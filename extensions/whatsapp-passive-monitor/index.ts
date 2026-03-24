@@ -1,5 +1,5 @@
-import { runPluginCommandWithTimeout } from "openclaw/plugin-sdk";
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { runPluginCommandWithTimeout } from "openclaw/plugin-sdk/sandbox";
 import { createDebounceManager, type DebounceManager } from "./src/debounce.js";
 import { createFileLogger, composeLoggers } from "./src/file-logger.js";
 import { AgentRepositoryImpl } from "./src/repository/agent-repository.js";
