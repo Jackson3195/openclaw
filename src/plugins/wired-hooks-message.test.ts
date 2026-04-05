@@ -38,8 +38,7 @@ async function expectMessageHookCall(params: {
 describe("message_observed hook runner", () => {
   it("returns { handled: true } when handler signals handled", async () => {
     const handler = vi.fn().mockReturnValue({ handled: true });
-    const registry = createMockPluginRegistry([{ hookName: "message_observed", handler }]);
-    const runner = createHookRunner(registry);
+    const { runner } = createHookRunnerWithRegistry([{ hookName: "message_observed", handler }]);
 
     const result = await runner.runMessageObserved(
       { from: "user-1", content: "hello", fromMe: false },
@@ -55,8 +54,7 @@ describe("message_observed hook runner", () => {
 
   it("returns undefined for void-returning handlers", async () => {
     const handler = vi.fn(); // returns undefined
-    const registry = createMockPluginRegistry([{ hookName: "message_observed", handler }]);
-    const runner = createHookRunner(registry);
+    const { runner } = createHookRunnerWithRegistry([{ hookName: "message_observed", handler }]);
 
     const result = await runner.runMessageObserved(
       { from: "user-1", content: "hello", fromMe: false },
@@ -69,8 +67,7 @@ describe("message_observed hook runner", () => {
 
   it("handler receives fromMe field correctly", async () => {
     const handler = vi.fn().mockReturnValue({ handled: true });
-    const registry = createMockPluginRegistry([{ hookName: "message_observed", handler }]);
-    const runner = createHookRunner(registry);
+    const { runner } = createHookRunnerWithRegistry([{ hookName: "message_observed", handler }]);
 
     await runner.runMessageObserved(
       { from: "+15555550123", content: "outbound msg", fromMe: true },

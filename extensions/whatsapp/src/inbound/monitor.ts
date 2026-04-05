@@ -287,7 +287,7 @@ export async function monitorWebInbox(options: {
     const access = await checkInboundAccessControl({
       accountId: options.accountId,
       from: resolved.from,
-      selfE164,
+      selfE164: self.e164 ?? null,
       senderE164: resolved.senderE164,
       group: resolved.group,
       pushName: msg.pushName ?? undefined,

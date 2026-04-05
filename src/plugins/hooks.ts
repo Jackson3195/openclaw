@@ -588,7 +588,7 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
       "message_observed",
       event,
       ctx,
-      (acc, next) => ({ handled: next.handled ?? acc?.handled }),
+      { mergeResults: (acc, next) => ({ handled: next.handled ?? acc?.handled }) },
     );
   }
 
