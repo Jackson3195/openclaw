@@ -20,15 +20,27 @@ export type CommandAuthorization = {
   to?: string;
 };
 
+type InferredProviderCandidate = {
+  providerId: ChannelId;
+  hadResolutionError: boolean;
+};
+
+type InferredProviderProbe = {
+  candidates: InferredProviderCandidate[];
+  droppedResolutionError: boolean;
+};
+
 function resolveProviderFromContext(
   ctx: MsgContext,
   cfg: OpenClawConfig,
 ): { providerId: ChannelId | undefined; hadResolutionError: boolean } {
-  const explicitMessageChannel =
-    normalizeMessageChannel(ctx.Provider) ??
-    normalizeMessageChannel(ctx.Surface) ??
-    normalizeMessageChannel(ctx.OriginatingChannel);
-  if (explicitMessageChannel === INTERNAL_MESSAGE_CHANNEL) {
+  const explicitMessageChannels = [ctx.Surface, ctx.OriginatingChannel, ctx.Provider]
+    .map((value) => normalizeMessageChannel(value))
+    .filter((value): value is string => Boolean(value));
+  const explicitMessageChannel = explicitMessageChannels.find(
+    (value) => value !== INTERNAL_MESSAGE_CHANNEL,
+  );
+  if (!explicitMessageChannel && explicitMessageChannels.includes(INTERNAL_MESSAGE_CHANNEL)) {
     return { providerId: undefined, hadResolutionError: false };
   }
   const direct =
@@ -56,7 +68,25 @@ function resolveProviderFromContext(
       return { providerId: normalized, hadResolutionError: false };
     }
   }
-  const configured = listChannelPlugins()
+  const inferredProviders = probeInferredProviders(ctx, cfg);
+  const inferred = inferredProviders.candidates;
+  if (inferred.length === 1) {
+    return {
+      providerId: inferred[0].providerId,
+      hadResolutionError: inferred[0].hadResolutionError,
+    };
+  }
+  return {
+    providerId: undefined,
+    hadResolutionError:
+      inferredProviders.droppedResolutionError ||
+      inferred.some((entry) => entry.hadResolutionError),
+  };
+}
+
+function probeInferredProviders(ctx: MsgContext, cfg: OpenClawConfig): InferredProviderProbe {
+  let droppedResolutionError = false;
+  const candidates = listChannelPlugins()
     .map((plugin) => {
       const resolvedAllowFrom = resolveProviderAllowFrom({
         plugin,
@@ -70,6 +100,9 @@ function resolveProviderFromContext(
         allowFrom: resolvedAllowFrom.allowFrom,
       });
       if (allowFrom.length === 0) {
+        if (resolvedAllowFrom.hadResolutionError) {
+          droppedResolutionError = true;
+        }
         return null;
       }
       return {
@@ -77,20 +110,10 @@ function resolveProviderFromContext(
         hadResolutionError: resolvedAllowFrom.hadResolutionError,
       };
     })
-    .filter(
-      (
-        value,
-      ): value is {
-        providerId: ChannelId;
-        hadResolutionError: boolean;
-      } => Boolean(value),
-    );
-  if (configured.length === 1) {
-    return configured[0];
-  }
+    .filter((value): value is InferredProviderCandidate => Boolean(value));
   return {
-    providerId: undefined,
-    hadResolutionError: configured.some((entry) => entry.hadResolutionError),
+    candidates,
+    droppedResolutionError,
   };
 }
 
@@ -450,6 +473,9 @@ export function resolveCommandAuthorization(params: {
   const plugin = providerId ? getChannelPlugin(providerId) : undefined;
   const from = (ctx.From ?? "").trim();
   const to = (ctx.To ?? "").trim();
+  const commandsAllowFromConfigured = Boolean(
+    cfg.commands?.allowFrom && typeof cfg.commands.allowFrom === "object",
+  );
 
   // Check if commands.allowFrom is configured (separate command authorization)
   const commandsAllowFromList = resolveCommandsAllowFromList({
@@ -565,10 +591,12 @@ export function resolveCommandAuthorization(params: {
   // If commands.allowFrom is configured, use it for command authorization
   // Otherwise, fall back to existing behavior (channel allowFrom + owner checks)
   let isAuthorizedSender: boolean;
-  if (commandsAllowFromList !== null) {
+  if (commandsAllowFromList !== null || (providerResolutionError && commandsAllowFromConfigured)) {
     // commands.allowFrom is configured - use it for authorization
-    const commandsAllowAll = commandsAllowFromList.some((entry) => entry.trim() === "*");
-    const matchedCommandsAllowFrom = commandsAllowFromList.length
+    const commandsAllowAll =
+      !providerResolutionError &&
+      Boolean(commandsAllowFromList?.some((entry) => entry.trim() === "*"));
+    const matchedCommandsAllowFrom = commandsAllowFromList?.length
       ? senderCandidates.find((candidate) => commandsAllowFromList.includes(candidate))
       : undefined;
     isAuthorizedSender =
