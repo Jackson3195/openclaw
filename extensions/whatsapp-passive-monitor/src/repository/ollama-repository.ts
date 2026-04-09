@@ -58,7 +58,7 @@ export class OllamaRepositoryImpl implements OllamaRepository {
       }
 
       // Log raw response before parsing — helps debug malformed LLM output
-      // this.logger.info(`ollama raw response: ${trimmed}`);
+      this.logger.info(`ollama raw response: ${trimmed}`);
 
       return JSON.parse(trimmed) as T;
     } catch (err) {
