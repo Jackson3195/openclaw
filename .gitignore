@@ -43,6 +43,8 @@ apps/shared/OpenClawKit/Package.resolved
 bin/
 bin/clawdbot-mac
 bin/docs-list
+!skills/*/bin/
+!skills/*/bin/**
 apps/macos/.build-local/
 apps/macos/.swiftpm/
 apps/shared/MoltbotKit/.swiftpm/
