@@ -102,7 +102,9 @@ export class DetectionRepositoryImpl implements DetectionRepository {
 
   getLastDetection(conversationId: string): StoredDetection | null {
     const rows = this.queryStmt.all(conversationId) as DetectionRow[];
-    if (rows.length === 0) return null;
+    if (rows.length === 0) {
+      return null;
+    }
 
     const row = rows[0];
     return {

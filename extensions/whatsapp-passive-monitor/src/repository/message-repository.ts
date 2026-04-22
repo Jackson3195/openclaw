@@ -69,6 +69,6 @@ export class MessageRepositoryImpl implements MessageRepository {
     const limit = options?.limit ?? DEFAULT_LIMIT;
     const rows = this.queryStmt.all(conversationId, limit) as StoredMessage[];
     // Reverse from DESC to chronological order (oldest first)
-    return rows.reverse();
+    return rows.toReversed();
   }
 }

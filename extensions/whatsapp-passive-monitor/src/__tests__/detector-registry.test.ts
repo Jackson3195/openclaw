@@ -67,9 +67,13 @@ describe("DetectorRegistry", () => {
     const detectors = [vi.fn(async () => {}), vi.fn(async () => {}), vi.fn(async () => {})];
 
     const registry = createDetectorRegistry(createMockLogger());
-    for (const d of detectors) registry.add(d);
+    for (const d of detectors) {
+      registry.add(d);
+    }
     await registry.runAll(ctx);
 
-    for (const d of detectors) expect(d).toHaveBeenCalledOnce();
+    for (const d of detectors) {
+      expect(d).toHaveBeenCalledOnce();
+    }
   });
 });

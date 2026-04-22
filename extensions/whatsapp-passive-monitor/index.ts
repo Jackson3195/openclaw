@@ -83,7 +83,9 @@ export default function register(api: OpenClawPluginApi) {
   // before access control. Stores in SQLite, resets debounce,
   // and returns { handled: true } to block agent dispatch.
   api.on("message_observed", async (event, ctx) => {
-    if (ctx.channelId !== "whatsapp") return;
+    if (ctx.channelId !== "whatsapp") {
+      return { handled: false };
+    }
 
     messageRepo.insertMessage({
       conversation_id: ctx.conversationId ?? event.from,

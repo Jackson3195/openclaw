@@ -35,7 +35,6 @@ export class SqliteRepositoryImpl implements SqliteRepository {
     }
 
     // Dynamic import of node:sqlite via createRequire (same pattern as core)
-    // oxlint-disable-next-line @typescript-eslint/no-require-imports
     const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
     this.db = new DatabaseSync(dbPath);
   }

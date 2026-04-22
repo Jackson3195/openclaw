@@ -146,12 +146,16 @@ ${conversation}`;
    */
   const determineDetection = (results: Array<MeetingClassification | null>): DetectionAction => {
     // Any null means an error occurred — do nothing
-    if (results.some((r) => r === null)) return "none";
+    if (results.some((r) => r === null)) {
+      return "none";
+    }
 
     const isTT = (r: MeetingClassification) => r.has_agreed_to_meet && r.has_agreed_date;
     const ttCount = results.filter((r) => isTT(r!)).length;
 
-    if (ttCount === results.length) return "add_calendar_event";
+    if (ttCount === results.length) {
+      return "add_calendar_event";
+    }
     // Previously (pre-2868f06), exactly one T+T triggered "confirm_with_customer" which
     // escalated to the main agent for user confirmation. Removed because disagreement
     // escalations were noisy false positives — now only both-agree triggers a detection.
