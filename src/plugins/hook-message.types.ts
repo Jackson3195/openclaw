@@ -35,6 +35,7 @@ export type PluginHookMessageReceivedEvent = {
   from: string;
   content: string;
   timestamp?: number;
+  threadId?: string | number;
   metadata?: Record<string, unknown>;
 };
 
@@ -54,6 +55,8 @@ export type PluginHookMessageObservedResult = {
 export type PluginHookMessageSendingEvent = {
   to: string;
   content: string;
+  replyToId?: string | number;
+  threadId?: string | number;
   metadata?: Record<string, unknown>;
 };
 
