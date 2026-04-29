@@ -1354,6 +1354,12 @@ importers:
         specifier: workspace:*
         version: link:../..
 
+  extensions/whatsapp-passive-monitor:
+    devDependencies:
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
+
   extensions/xai:
     dependencies:
       '@mariozechner/pi-ai':
