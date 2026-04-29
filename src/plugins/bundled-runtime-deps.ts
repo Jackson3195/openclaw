@@ -65,8 +65,6 @@ const BUNDLED_RUNTIME_MIRROR_PLUGIN_REGION_RE = /(?:^|\n)\/\/#region extensions\
 
 const registeredBundledRuntimeDepNodePaths = new Set<string>();
 
-const registeredBundledRuntimeDepNodePaths = new Set<string>();
-
 export type BundledRuntimeDepsNpmRunner = {
   command: string;
   args: string[];
