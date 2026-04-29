@@ -52,9 +52,15 @@ present.
 
 - OpenClaw creates collections from your workspace memory files and any
   configured `memory.qmd.paths`, then runs `qmd update` on boot and
-  periodically (default every 5 minutes). Semantic modes also run `qmd embed`.
+  periodically (default every 5 minutes). These refreshes run through QMD
+  subprocesses, not an in-process filesystem crawl. Semantic modes also run
+  `qmd embed`.
 - The default workspace collection tracks `MEMORY.md` plus the `memory/`
   tree. Lowercase `memory.md` is not indexed as a root memory file.
+- QMD's own scanner ignores hidden paths and common dependency/build
+  directories such as `.git`, `.cache`, `node_modules`, `vendor`, `dist`, and
+  `build`. Boot refreshes use a one-shot QMD subprocess path instead of
+  creating the full long-lived in-process watcher during gateway startup.
 - Boot refresh runs in the background so chat startup is not blocked.
 - Searches use the configured `searchMode` (default: `search`; also supports
   `vsearch` and `query`). `search` is BM25-only, so OpenClaw skips semantic
@@ -64,6 +70,9 @@ present.
   same-source collections into one QMD search invocation. Older QMD releases
   keep the compatible per-collection fallback.
 - If QMD fails entirely, OpenClaw falls back to the builtin SQLite engine.
+  Repeated chat-turn attempts back off briefly after an open failure so a
+  missing binary or broken sidecar dependency does not create a retry storm;
+  `openclaw memory status` and one-shot CLI probes still recheck QMD directly.
 
 <Info>
 The first search may be slow -- QMD auto-downloads GGUF models (~2 GB) for
