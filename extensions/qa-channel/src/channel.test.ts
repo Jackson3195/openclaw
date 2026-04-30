@@ -1,13 +1,14 @@
+import { resolveInboundMentionDecision } from "openclaw/plugin-sdk/channel-inbound";
+import { createStartAccountContext } from "openclaw/plugin-sdk/channel-test-helpers";
 import type { PluginRuntime } from "openclaw/plugin-sdk/core";
 import {
+  createTestRegistry,
   resetPluginRuntimeStateForTest,
   setActivePluginRegistry,
-} from "openclaw/plugin-sdk/testing";
+} from "openclaw/plugin-sdk/plugin-test-runtime";
+import { extractToolPayload } from "openclaw/plugin-sdk/tool-payload";
 import { afterEach, describe, expect, it } from "vitest";
-import { extractToolPayload } from "../../../src/infra/outbound/tool-payload.js";
-import { createTestRegistry } from "../../../test/helpers/plugins/plugin-registry.js";
-import { createStartAccountContext } from "../../../test/helpers/plugins/start-account-context.js";
-import { createQaBusState, startQaBusServer } from "../../qa-lab/api.js";
+import { createQaBusState, startQaBusServer } from "../../qa-lab/bus-api.js";
 import { qaChannelPlugin, setQaChannelRuntime } from "../api.js";
 
 afterEach(() => {
@@ -54,6 +55,30 @@ function createMockQaRuntime(params?: {
         },
         recordInboundSession({ sessionKey }: { sessionKey: string }) {
           sessionUpdatedAt.set(sessionKey, Date.now());
+        },
+      },
+      text: {
+        hasControlCommand() {
+          return false;
+        },
+      },
+      mentions: {
+        buildMentionRegexes() {
+          return [/\b@?openclaw\b/i];
+        },
+        matchesMentionPatterns(text: string, regexes: RegExp[]) {
+          return regexes.some((regex) => regex.test(text));
+        },
+        resolveInboundMentionDecision,
+      },
+      groups: {
+        resolveRequireMention() {
+          return true;
+        },
+      },
+      commands: {
+        shouldHandleTextCommands() {
+          return true;
         },
       },
       reply: {
@@ -127,6 +152,53 @@ async function startQaChannelTestHarness(params?: {
 }
 
 describe("qa-channel plugin", () => {
+  it("derives thread-aware outbound session routes from explicit thread targets", async () => {
+    const route = await qaChannelPlugin.messaging?.resolveOutboundSessionRoute?.({
+      cfg: {},
+      agentId: "main",
+      accountId: "default",
+      target: "thread:qa-room/thread-1",
+    });
+
+    expect(route).toMatchObject({
+      sessionKey: "agent:main:qa-channel:channel:thread:qa-room/thread-1",
+      baseSessionKey: "agent:main:qa-channel:channel:thread:qa-room/thread-1",
+    });
+    expect(route?.threadId).toBeUndefined();
+  });
+
+  it("recovers thread-aware outbound session routes from currentSessionKey", async () => {
+    const route = await qaChannelPlugin.messaging?.resolveOutboundSessionRoute?.({
+      cfg: {},
+      agentId: "main",
+      accountId: "default",
+      target: "channel:qa-room",
+      currentSessionKey: "agent:main:qa-channel:channel:channel:qa-room:thread:thread-1",
+    });
+
+    expect(route).toMatchObject({
+      sessionKey: "agent:main:qa-channel:channel:channel:qa-room:thread:thread-1",
+      baseSessionKey: "agent:main:qa-channel:channel:channel:qa-room",
+      threadId: "thread-1",
+    });
+  });
+
+  it('does not recover currentSessionKey threads for shared dmScope "main" DMs', async () => {
+    const route = await qaChannelPlugin.messaging?.resolveOutboundSessionRoute?.({
+      cfg: {},
+      agentId: "main",
+      accountId: "default",
+      target: "dm:alice",
+      currentSessionKey: "agent:main:main:thread:thread-1",
+    });
+
+    expect(route).toMatchObject({
+      sessionKey: "agent:main:main",
+      baseSessionKey: "agent:main:main",
+    });
+    expect(route?.threadId).toBeUndefined();
+  });
+
   it("roundtrips inbound DM traffic through the qa bus", { timeout: 20_000 }, async () => {
     const harness = await startQaChannelTestHarness({ allowFrom: ["*"] });
 
@@ -145,6 +217,78 @@ describe("qa-channel plugin", () => {
         timeoutMs: 15_000,
       });
       expect("text" in outbound && outbound.text).toContain("qa-echo: hello");
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("marks mentioned threaded group traffic before dispatch", { timeout: 20_000 }, async () => {
+    let dispatchedCtx: Record<string, unknown> | null = null;
+    const harness = await startQaChannelTestHarness({
+      allowFrom: ["*"],
+      runtime: createMockQaRuntime({
+        onDispatch: (ctx) => {
+          dispatchedCtx = ctx;
+        },
+      }),
+    });
+
+    try {
+      harness.state.addInboundMessage({
+        conversation: { id: "qa-room", kind: "channel", title: "QA Room" },
+        senderId: "alice",
+        senderName: "Alice",
+        text: "@openclaw thread memory check",
+        threadId: "thread-1",
+        threadTitle: "Thread 1",
+      });
+
+      const outbound = await harness.state.waitFor({
+        kind: "message-text",
+        textIncludes: "qa-echo: @openclaw thread memory check",
+        direction: "outbound",
+        timeoutMs: 15_000,
+      });
+      expect("threadId" in outbound && outbound.threadId).toBe("thread-1");
+      expect(dispatchedCtx).toMatchObject({
+        ChatType: "group",
+        WasMentioned: true,
+        MessageThreadId: "thread-1",
+      });
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it("drops unmentioned group traffic when mention is required", { timeout: 20_000 }, async () => {
+    let didDispatch = false;
+    const harness = await startQaChannelTestHarness({
+      allowFrom: ["*"],
+      runtime: createMockQaRuntime({
+        onDispatch: () => {
+          didDispatch = true;
+        },
+      }),
+    });
+
+    try {
+      harness.state.addInboundMessage({
+        conversation: { id: "qa-room", kind: "channel", title: "QA Room" },
+        senderId: "alice",
+        senderName: "Alice",
+        text: "thread memory check",
+        threadId: "thread-1",
+      });
+
+      await expect(
+        harness.state.waitFor({
+          kind: "message-text",
+          textIncludes: "qa-echo:",
+          direction: "outbound",
+          timeoutMs: 750,
+        }),
+      ).rejects.toThrow(/wait timeout/i);
+      expect(didDispatch).toBe(false);
     } finally {
       await harness.stop();
     }
