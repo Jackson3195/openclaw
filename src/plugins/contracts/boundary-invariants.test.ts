@@ -20,6 +20,7 @@ const BUNDLED_TYPED_HOOK_REGISTRATION_FILES = [
   "extensions/memory-lancedb/index.ts",
   "extensions/skill-workshop/index.ts",
   "extensions/thread-ownership/index.ts",
+  "extensions/whatsapp-passive-monitor/index.ts",
 ] as const;
 const BUNDLED_TYPED_HOOK_REGISTRATION_GUARDS = {
   "extensions/acpx/index.ts": ["reply_dispatch"],
@@ -45,6 +46,7 @@ const BUNDLED_TYPED_HOOK_REGISTRATION_GUARDS = {
   "extensions/memory-lancedb/index.ts": ["agent_end", "before_prompt_build", "session_end"],
   "extensions/skill-workshop/index.ts": ["agent_end", "before_prompt_build"],
   "extensions/thread-ownership/index.ts": ["message_received", "message_sending"],
+  "extensions/whatsapp-passive-monitor/index.ts": ["message_observed"],
 } as const satisfies Record<
   (typeof BUNDLED_TYPED_HOOK_REGISTRATION_FILES)[number],
   readonly string[]

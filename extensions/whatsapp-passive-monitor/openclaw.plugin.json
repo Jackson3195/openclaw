@@ -2,6 +2,9 @@
   "id": "whatsapp-passive-monitor",
   "name": "WhatsApp Passive Monitor",
   "description": "Intercepts WhatsApp messages via message_observed hook (pre-access-control), stores in SQLite, and classifies via local LLM. Returns { handled: true } to block agent dispatch.",
+  "activation": {
+    "onStartup": true
+  },
   "hooks": ["message_observed"],
   "configSchema": {
     "type": "object",
