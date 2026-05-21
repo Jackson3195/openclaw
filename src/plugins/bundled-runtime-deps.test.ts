@@ -30,7 +30,6 @@ import {
   resolveBundledRuntimeDependencyInstallRootPlan,
   resolveBundledRuntimeDepsNpmRunner,
   scanBundledPluginRuntimeDeps,
-  shouldMaterializeBundledRuntimeMirrorDistFile,
   type BundledRuntimeDepsInstallParams,
 } from "./bundled-runtime-deps.js";
 import {
@@ -76,41 +75,9 @@ afterEach(() => {
   spawnMock.mockReset();
   spawnSyncMock.mockReset();
   bundledRuntimeDepsActivityTesting.resetBundledRuntimeDepsInstallActivity();
-  bundledRuntimeDepsTesting.clearBundledRuntimeMirrorMaterializeCache();
-  bundledRuntimeDepsTesting.clearRootDistMirroredRuntimeDepsCache();
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-});
-
-describe("shouldMaterializeBundledRuntimeMirrorDistFile", () => {
-  it("reuses unchanged root dist file decisions without rereading source", () => {
-    const root = makeTempDir();
-    const sourcePath = path.join(root, "shared-runtime.js");
-    fs.writeFileSync(
-      sourcePath,
-      [
-        `//#region extensions/browser/src/runtime.ts`,
-        `export const marker = "shared-runtime";`,
-        `//#endregion`,
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-    const realReadFileSync = fs.readFileSync.bind(fs);
-    let sourceReads = 0;
-    vi.spyOn(fs, "readFileSync").mockImplementation(((target, options) => {
-      if (path.resolve(target.toString()) === path.resolve(sourcePath)) {
-        sourceReads += 1;
-      }
-      return realReadFileSync(target, options as never);
-    }) as typeof fs.readFileSync);
-
-    expect(shouldMaterializeBundledRuntimeMirrorDistFile(sourcePath)).toBe(true);
-    expect(shouldMaterializeBundledRuntimeMirrorDistFile(sourcePath)).toBe(true);
-
-    expect(sourceReads).toBe(1);
-  });
 });
 
 describe("resolveBundledRuntimeDepsNpmRunner", () => {
@@ -1783,59 +1750,6 @@ describe("scanBundledPluginRuntimeDeps config policy", () => {
 });
 
 describe("ensureBundledPluginRuntimeDeps", () => {
-  it("reuses package-level root dist runtime dependency scans across bundled plugins", () => {
-    const packageRoot = makeTempDir();
-    fs.writeFileSync(
-      path.join(packageRoot, "package.json"),
-      JSON.stringify({
-        dependencies: {
-          "shared-runtime": "1.0.0",
-        },
-      }),
-    );
-    const sharedDistFile = path.join(packageRoot, "dist", "shared-runtime.js");
-    fs.mkdirSync(path.dirname(sharedDistFile), { recursive: true });
-    fs.writeFileSync(sharedDistFile, `import "shared-runtime";\nexport const value = 1;\n`, "utf8");
-    const alphaRoot = writeBundledPluginPackage({
-      packageRoot,
-      pluginId: "alpha",
-      deps: { "shared-runtime": "1.0.0" },
-      enabledByDefault: true,
-    });
-    const betaRoot = writeBundledPluginPackage({
-      packageRoot,
-      pluginId: "beta",
-      deps: { "shared-runtime": "1.0.0" },
-      enabledByDefault: true,
-    });
-    const realReadFileSync = fs.readFileSync.bind(fs);
-    let sharedDistReads = 0;
-    vi.spyOn(fs, "readFileSync").mockImplementation(((target, options) => {
-      if (path.resolve(target.toString()) === path.resolve(sharedDistFile)) {
-        sharedDistReads += 1;
-      }
-      return realReadFileSync(target, options as never);
-    }) as typeof fs.readFileSync);
-    const installDeps = (params: BundledRuntimeDepsInstallParams) => {
-      writeInstalledPackage(params.installRoot, "shared-runtime", "1.0.0");
-    };
-
-    ensureBundledPluginRuntimeDeps({
-      env: {},
-      installDeps,
-      pluginId: "alpha",
-      pluginRoot: alphaRoot,
-    });
-    ensureBundledPluginRuntimeDeps({
-      env: {},
-      installDeps,
-      pluginId: "beta",
-      pluginRoot: betaRoot,
-    });
-
-    expect(sharedDistReads).toBe(1);
-  });
-
   it("installs plugin-local runtime deps when one is missing", () => {
     const packageRoot = makeTempDir();
     const extensionsRoot = path.join(packageRoot, "dist", "extensions");
