@@ -55,6 +55,7 @@ import { loadModelCatalog } from "./model-catalog.js";
 import { runWithModelFallback } from "./model-fallback.js";
 import {
   buildAllowedModelSet,
+  buildConfiguredModelCatalog,
   modelKey,
   normalizeModelRef,
   parseModelRef,
@@ -343,7 +344,13 @@ async function prepareAgentCommandExecution(
     defaultProvider: DEFAULT_PROVIDER,
     defaultModel: DEFAULT_MODEL,
   });
-  const thinkingLevelsHint = formatThinkingLevels(configuredModel.provider, configuredModel.model);
+  const configuredThinkingCatalog = buildConfiguredModelCatalog({ cfg });
+  const thinkingLevelsHint = formatThinkingLevels(
+    configuredModel.provider,
+    configuredModel.model,
+    ", ",
+    configuredThinkingCatalog.length > 0 ? configuredThinkingCatalog : undefined,
+  );
 
   const thinkOverride = normalizeThinkLevel(opts.thinking);
   const thinkOnce = normalizeThinkLevel(opts.thinkingOnce);
@@ -433,6 +440,7 @@ async function prepareAgentCommandExecution(
     body,
     transcriptBody,
     cfg,
+    configuredThinkingCatalog,
     normalizedSpawned,
     agentCfg,
     thinkOverride,
@@ -469,6 +477,7 @@ async function agentCommandInternal(
     body,
     transcriptBody,
     cfg,
+    configuredThinkingCatalog,
     normalizedSpawned,
     agentCfg,
     thinkOverride,
@@ -875,17 +884,18 @@ async function agentCommandInternal(
       }
     }
 
+    const catalogForThinking =
+      modelCatalog ??
+      (allowedModelCatalog.length > 0 ? allowedModelCatalog : configuredThinkingCatalog);
+    const thinkingCatalog = catalogForThinking.length > 0 ? catalogForThinking : undefined;
     if (!resolvedThinkLevel) {
-      const catalogForThinking = modelCatalog ?? allowedModelCatalog;
       resolvedThinkLevel = resolveThinkingDefault({
         cfg,
         provider,
         model,
-        catalog: catalogForThinking.length > 0 ? catalogForThinking : undefined,
+        catalog: thinkingCatalog,
       });
     }
-    const catalogForThinking = modelCatalog ?? allowedModelCatalog;
-    const thinkingCatalog = catalogForThinking.length > 0 ? catalogForThinking : undefined;
     if (
       !isThinkingLevelSupported({
         provider,
@@ -1045,6 +1055,7 @@ async function agentCommandInternal(
                     runId,
                     stream: evt.stream,
                     data: evt.data ?? {},
+                    ...(evt.sessionKey ? { sessionKey: evt.sessionKey } : {}),
                   });
                 }
                 if (

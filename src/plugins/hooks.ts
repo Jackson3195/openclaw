@@ -45,6 +45,10 @@ import type {
   PluginAgentTurnPrepareResult,
   PluginHeartbeatPromptContributionEvent,
   PluginHeartbeatPromptContributionResult,
+  PluginHookCronChangedEvent,
+  PluginHookGatewayCronDeliveryStatus,
+  PluginHookGatewayCronJobState,
+  PluginHookGatewayCronRunStatus,
   PluginHookGatewayContext,
   PluginHookGatewayStartEvent,
   PluginHookGatewayStopEvent,
@@ -134,6 +138,10 @@ export type {
   PluginHookSubagentSpawningResult,
   PluginHookSubagentSpawnedEvent,
   PluginHookSubagentEndedEvent,
+  PluginHookCronChangedEvent,
+  PluginHookGatewayCronDeliveryStatus,
+  PluginHookGatewayCronJobState,
+  PluginHookGatewayCronRunStatus,
   PluginHookGatewayContext,
   PluginHookGatewayStartEvent,
   PluginHookGatewayStopEvent,
@@ -393,21 +401,33 @@ export function createHookRunner(
     return typeof (value as { then?: unknown }).then === "function";
   };
 
-  const getVoidHookTimeoutMs = (hookName: PluginHookName): number | undefined => {
-    const timeoutMs = voidHookTimeoutMsByHook[hookName];
+  const normalizePositiveTimeoutMs = (timeoutMs: number | undefined): number | undefined => {
     if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       return undefined;
     }
     return Math.floor(timeoutMs);
   };
 
-  const getModifyingHookTimeoutMs = (hookName: PluginHookName): number | undefined => {
-    const timeoutMs = modifyingHookTimeoutMsByHook[hookName];
-    if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-      return undefined;
-    }
-    return Math.floor(timeoutMs);
-  };
+  const getVoidHookTimeoutMs = (
+    hookName: PluginHookName,
+    hook: PluginHookRegistration,
+  ): number | undefined =>
+    normalizePositiveTimeoutMs(hook.timeoutMs) ??
+    normalizePositiveTimeoutMs(voidHookTimeoutMsByHook[hookName]);
+
+  const getModifyingHookTimeoutMs = (
+    hookName: PluginHookName,
+    hook: PluginHookRegistration,
+  ): number | undefined =>
+    normalizePositiveTimeoutMs(hook.timeoutMs) ??
+    normalizePositiveTimeoutMs(modifyingHookTimeoutMsByHook[hookName]);
+
+  const getClaimingHookTimeoutMs = (
+    hookName: PluginHookName,
+    hook: PluginHookRegistration,
+  ): number | undefined =>
+    normalizePositiveTimeoutMs(hook.timeoutMs) ??
+    normalizePositiveTimeoutMs(modifyingHookTimeoutMsByHook[hookName]);
 
   const withHookTimeout = async <T>(
     promise: Promise<T>,
@@ -463,7 +483,7 @@ export function createHookRunner(
         const promise = Promise.resolve(
           (hook.handler as (event: unknown, ctx: unknown) => Promise<void> | void)(event, ctx),
         );
-        const timeoutMs = getVoidHookTimeoutMs(hookName);
+        const timeoutMs = getVoidHookTimeoutMs(hookName, hook);
         if (timeoutMs) {
           await withHookTimeout(promise, timeoutMs, { unref: true });
         } else {
@@ -500,7 +520,7 @@ export function createHookRunner(
       try {
         const handler = hook.handler as (event: unknown, ctx: unknown) => Promise<TResult>;
         const promise = Promise.resolve(handler(event, ctx));
-        const timeoutMs = getModifyingHookTimeoutMs(hookName);
+        const timeoutMs = getModifyingHookTimeoutMs(hookName, hook);
         const handlerResult = timeoutMs ? await withHookTimeout(promise, timeoutMs) : await promise;
 
         if (handlerResult !== undefined && handlerResult !== null) {
@@ -577,9 +597,11 @@ export function createHookRunner(
   ): Promise<TResult | undefined> {
     for (const hook of hooks) {
       try {
-        const handlerResult = await (
-          hook.handler as (event: unknown, ctx: unknown) => Promise<TResult | void>
-        )(event, ctx);
+        const promise = Promise.resolve(
+          (hook.handler as (event: unknown, ctx: unknown) => Promise<TResult | void>)(event, ctx),
+        );
+        const timeoutMs = getClaimingHookTimeoutMs(hookName, hook);
+        const handlerResult = timeoutMs ? await withHookTimeout(promise, timeoutMs) : await promise;
         if (handlerResult?.handled) {
           return handlerResult;
         }
@@ -626,9 +648,11 @@ export function createHookRunner(
     let firstError: string | null = null;
     for (const hook of hooks) {
       try {
-        const handlerResult = await (
-          hook.handler as (event: unknown, ctx: unknown) => Promise<TResult | void>
-        )(event, ctx);
+        const promise = Promise.resolve(
+          (hook.handler as (event: unknown, ctx: unknown) => Promise<TResult | void>)(event, ctx),
+        );
+        const timeoutMs = getClaimingHookTimeoutMs(hookName, hook);
+        const handlerResult = timeoutMs ? await withHookTimeout(promise, timeoutMs) : await promise;
         if (handlerResult?.handled) {
           return { status: "handled", result: handlerResult };
         }
@@ -703,6 +727,8 @@ export function createHookRunner(
   }
 
   /**
+   * @deprecated Use runBeforeModelResolve and runBeforePromptBuild.
+   *
    * Run before_agent_start hook.
    * Legacy compatibility hook that combines model resolve + prompt build phases.
    */
@@ -1283,6 +1309,16 @@ export function createHookRunner(
     >("heartbeat_prompt_contribution", event, ctx, { mergeResults: mergeAgentTurnPrepare });
   }
 
+  /**
+   * Run cron_changed hook for gateway-owned cron lifecycle changes.
+   */
+  async function runCronChanged(
+    event: PluginHookCronChangedEvent,
+    ctx: PluginHookGatewayContext,
+  ): Promise<void> {
+    return runVoidHook("cron_changed", event, ctx);
+  }
+
   // =========================================================================
   // Skill Install Hooks
   // =========================================================================
@@ -1379,6 +1415,7 @@ export function createHookRunner(
     runGatewayStart,
     runGatewayStop,
     runHeartbeatPromptContribution,
+    runCronChanged,
     // Install hooks
     runBeforeInstall,
     // Utility

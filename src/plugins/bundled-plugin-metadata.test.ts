@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import { collectBundledChannelConfigs } from "./bundled-channel-config-metadata.js";
 import {
   type BundledPluginMetadata,
-  clearBundledPluginMetadataCache,
   listBundledPluginMetadata,
   resolveBundledPluginGeneratedPath,
   resolveBundledPluginRepoEntryPath,
@@ -36,6 +35,7 @@ const EXPECTED_BUNDLED_STARTUP_PLUGIN_IDS = [
   "diagnostics-otel",
   "diagnostics-prometheus",
   "diffs",
+  "file-transfer",
   "google-meet",
   "llm-task",
   "lobster",
@@ -54,6 +54,7 @@ const EXPECTED_EMPTY_CONFIG_GATEWAY_STARTUP_PLUGIN_IDS = [
   "bonjour",
   "browser",
   "device-pair",
+  "file-transfer",
   "memory-core",
   "phone-control",
   "talk-voice",
@@ -473,8 +474,6 @@ describe("bundled plugin metadata", () => {
       configSchema: { type: "object" },
     });
     fs.writeFileSync(path.join(pluginRoot, "index.ts"), "export const source = true;\n", "utf8");
-
-    clearBundledPluginMetadataCache();
     expect(
       listBundledPluginMetadata({
         rootDir: tempRoot,
@@ -492,6 +491,35 @@ describe("bundled plugin metadata", () => {
         pluginsDir,
       ),
     ).toBe(path.join(pluginRoot, "index.ts"));
+  });
+
+  it("reflects bundled manifest edits on the next metadata read", () => {
+    const tempRoot = createGeneratedPluginTempRoot("openclaw-bundled-plugin-fresh-");
+    const pluginRoot = path.join(tempRoot, "extensions", "alpha");
+
+    writeJson(path.join(pluginRoot, "package.json"), {
+      name: "@openclaw/alpha",
+      version: "0.0.1",
+      openclaw: {
+        extensions: ["./index.ts"],
+      },
+    });
+    fs.writeFileSync(path.join(pluginRoot, "index.ts"), "export const source = true;\n", "utf8");
+    writeJson(path.join(pluginRoot, "openclaw.plugin.json"), {
+      id: "alpha",
+      name: "Before",
+      configSchema: { type: "object" },
+    });
+
+    expect(listBundledPluginMetadata({ rootDir: tempRoot })[0]?.manifest.name).toBe("Before");
+
+    writeJson(path.join(pluginRoot, "openclaw.plugin.json"), {
+      id: "alpha",
+      name: "After",
+      configSchema: { type: "object" },
+    });
+
+    expect(listBundledPluginMetadata({ rootDir: tempRoot })[0]?.manifest.name).toBe("After");
   });
 
   it("prefers direct scan-dir overrides over nested dist artifacts within the same override root", () => {
@@ -549,8 +577,6 @@ describe("bundled plugin metadata", () => {
 
     fs.mkdirSync(distPluginRoot, { recursive: true });
     fs.writeFileSync(path.join(distPluginRoot, "index.js"), "export const built = true;\n", "utf8");
-
-    clearBundledPluginMetadataCache();
     expect(
       resolveBundledPluginRepoEntryPath({
         rootDir: tempRoot,
@@ -614,8 +640,6 @@ describe("bundled plugin metadata", () => {
       ].join("\n"),
       "utf8",
     );
-
-    clearBundledPluginMetadataCache();
     const entries = listBundledPluginMetadata({ rootDir: tempRoot });
     const channelConfigs = entries[0]?.manifest.channelConfigs as
       | Record<string, unknown>
@@ -668,8 +692,6 @@ describe("bundled plugin metadata", () => {
       "export {};\n",
       "utf8",
     );
-
-    clearBundledPluginMetadataCache();
     const entries = listBundledPluginMetadata({ rootDir: tempRoot });
     const firstEntry = entries[0] as
       | {
@@ -736,8 +758,6 @@ describe("bundled plugin metadata", () => {
       ].join("\n"),
       "utf8",
     );
-
-    clearBundledPluginMetadataCache();
     const entries = listBundledPluginMetadata({ rootDir: distRoot });
     const channelConfigs = entries[0]?.manifest.channelConfigs as
       | Record<string, unknown>
@@ -817,8 +837,6 @@ describe("bundled plugin metadata", () => {
       ].join("\n"),
       "utf8",
     );
-
-    clearBundledPluginMetadataCache();
     const entries = listBundledPluginMetadata({ rootDir: distRoot });
     const channelConfigs = entries[0]?.manifest.channelConfigs as
       | Record<string, unknown>
