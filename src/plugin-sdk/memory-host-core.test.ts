@@ -9,7 +9,6 @@ import {
   buildActiveMemoryPromptSection,
   listActiveMemoryPublicArtifacts,
 } from "./memory-host-core.js";
-import * as memoryCoreAlias from "./memory-core.js";
 
 describe("memory-host-core helpers", () => {
   afterEach(() => {
