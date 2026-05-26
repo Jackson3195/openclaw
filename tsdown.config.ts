@@ -356,11 +356,8 @@ function buildDockerE2eHarnessEntries(): Record<string, string> {
 
 const coreDistEntries = buildCoreDistEntries();
 const dockerE2eHarnessEntries = buildDockerE2eHarnessEntries();
-const rootPackageExcludedExtensionDirs = collectRootPackageExcludedExtensionDirs();
 const rootBundledPluginBuildEntries = bundledPluginBuildEntries.filter(
-  ({ id }) =>
-    (shouldBuildPrivateQaEntries || !NON_PACKAGED_BUNDLED_PLUGIN_DIRS.has(id)) &&
-    !rootPackageExcludedExtensionDirs.has(id),
+  ({ id }) => shouldBuildPrivateQaEntries || !NON_PACKAGED_BUNDLED_PLUGIN_DIRS.has(id),
 );
 
 function buildUnifiedDistEntries(): Record<string, string> {
