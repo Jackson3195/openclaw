@@ -165,19 +165,12 @@ export async function loadModelCatalog(params?: {
   config?: OpenClawConfig;
   useCache?: boolean;
   readOnly?: boolean;
-  providerDiscoveryProviderIds?: readonly string[];
 }): Promise<ModelCatalogEntry[]> {
   const readOnly = params?.readOnly === true;
-  const providerDiscoveryProviderIds = params?.providerDiscoveryProviderIds
-    ?.map((value) => value.trim())
-    .filter(Boolean);
-  const scopedCatalog =
-    providerDiscoveryProviderIds !== undefined && providerDiscoveryProviderIds.length > 0;
-  const useSharedCache = !readOnly && !scopedCatalog;
   if (!readOnly && params?.useCache === false) {
     modelCatalogPromise = null;
   }
-  if (useSharedCache && modelCatalogPromise) {
+  if (!readOnly && modelCatalogPromise) {
     return modelCatalogPromise;
   }
 
@@ -203,11 +196,7 @@ export async function loadModelCatalog(params?: {
     try {
       const cfg = params?.config ?? getRuntimeConfig();
       if (!readOnly) {
-        await ensureOpenClawModelsJson(
-          cfg,
-          undefined,
-          scopedCatalog ? { providerDiscoveryProviderIds } : undefined,
-        );
+        await ensureOpenClawModelsJson(cfg);
         logStage("models-json-ready");
       }
       // IMPORTANT: keep the dynamic import *inside* the try/catch.
@@ -261,7 +250,6 @@ export async function loadModelCatalog(params?: {
       const supplemental = await augmentModelCatalogWithProviderPlugins({
         config: cfg,
         env: process.env,
-        ...(scopedCatalog ? { providerDiscoveryProviderIds } : {}),
         context: {
           config: cfg,
           agentDir,
@@ -282,7 +270,7 @@ export async function loadModelCatalog(params?: {
 
       if (models.length === 0) {
         // If we found nothing, don't cache this result so we can try again.
-        if (useSharedCache) {
+        if (!readOnly) {
           modelCatalogPromise = null;
         }
       }
@@ -296,7 +284,7 @@ export async function loadModelCatalog(params?: {
         log.warn(`Failed to load model catalog: ${String(error)}`);
       }
       // Don't poison the cache on transient dependency/filesystem issues.
-      if (useSharedCache) {
+      if (!readOnly) {
         modelCatalogPromise = null;
       }
       if (models.length > 0) {
@@ -306,7 +294,7 @@ export async function loadModelCatalog(params?: {
     }
   };
 
-  if (!useSharedCache) {
+  if (readOnly) {
     return loadCatalog();
   }
 

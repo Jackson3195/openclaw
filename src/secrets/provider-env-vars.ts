@@ -9,7 +9,7 @@ import {
 import { loadPluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import { hasKind } from "../plugins/slots.js";
 
-export const CORE_PROVIDER_AUTH_ENV_VAR_CANDIDATES = {
+const CORE_PROVIDER_AUTH_ENV_VAR_CANDIDATES = {
   anthropic: ["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
   openai: ["OPENAI_API_KEY"],
   voyage: ["VOYAGE_API_KEY"],

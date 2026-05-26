@@ -526,12 +526,11 @@ async function runBasicAgentCommand() {
 }
 
 function expectFallbackOverrideCalls(first: boolean, second: boolean) {
-  const calls = state.resolveEffectiveModelFallbacksMock.mock.calls.slice(-2);
-  expect(calls).toHaveLength(2);
-  expect(calls[0]?.[0]).toMatchObject({
+  expect(state.resolveEffectiveModelFallbacksMock).toHaveBeenCalledTimes(2);
+  expect(state.resolveEffectiveModelFallbacksMock.mock.calls[0][0]).toMatchObject({
     hasSessionModelOverride: first,
   });
-  expect(calls[1]?.[0]).toMatchObject({
+  expect(state.resolveEffectiveModelFallbacksMock.mock.calls[1][0]).toMatchObject({
     hasSessionModelOverride: second,
   });
 }

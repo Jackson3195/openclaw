@@ -32,7 +32,6 @@ function scenarioMatchesLiveLane(params: {
   primaryModel: string;
   providerMode: QaProviderMode;
   claudeCliAuthMode?: QaCliBackendAuthMode;
-  env?: NodeJS.ProcessEnv;
 }) {
   const config = params.scenario.execution.config ?? {};
   const requiredProviderMode = normalizeQaConfigString(config.requiredProviderMode);
@@ -42,7 +41,6 @@ function scenarioMatchesLiveLane(params: {
   if (getQaProvider(params.providerMode).kind !== "live") {
     return true;
   }
-  const env = params.env ?? process.env;
   const selected = splitModelRef(params.primaryModel);
   const requiredProvider = normalizeQaConfigString(config.requiredProvider);
   if (requiredProvider && selected?.provider !== requiredProvider) {
@@ -54,10 +52,6 @@ function scenarioMatchesLiveLane(params: {
   }
   const requiredAuthMode = normalizeQaConfigString(config.authMode);
   if (requiredAuthMode && params.claudeCliAuthMode !== requiredAuthMode) {
-    return false;
-  }
-  const requiredEnv = normalizeQaConfigString(config.requiredEnv);
-  if (requiredEnv && !env[requiredEnv]?.trim()) {
     return false;
   }
   return true;

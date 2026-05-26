@@ -219,14 +219,6 @@ describe("isProviderUnavailableErrorMessage", () => {
       isProviderUnavailableErrorMessage("provider returned error: 502 Internal Server Error"),
     ).toBe(true);
   });
-
-  it("matches transient xAI model unavailability", () => {
-    expect(
-      isProviderUnavailableErrorMessage(
-        "Error Code null: Service temporarily unavailable. The model did not respond to this request.",
-      ),
-    ).toBe(true);
-  });
 });
 
 function isChatGPTUsageLimitErrorMessage(raw: string): boolean {
@@ -265,10 +257,8 @@ function isProviderUnavailableErrorMessage(raw: string): boolean {
     isCloudflareOrHtmlErrorPage(raw) ||
     msg.includes("no allowed providers are available") ||
     msg.includes("provider unavailable") ||
-    msg.includes("service temporarily unavailable") ||
     msg.includes("upstream provider unavailable") ||
     msg.includes("upstream error from google") ||
-    msg.includes("the model did not respond") ||
     msg.includes("temporarily rate-limited upstream") ||
     msg.includes("unable to access non-serverless model") ||
     msg.includes("create and start a new dedicated endpoint") ||
@@ -371,12 +361,12 @@ function resolveLiveModelsJsonTimeoutMs(
   modelsJsonTimeoutRaw?: string,
   setupTimeoutMs = LIVE_SETUP_TIMEOUT_MS,
 ): number {
-  return Math.max(setupTimeoutMs, toInt(modelsJsonTimeoutRaw, 180_000));
+  return Math.max(setupTimeoutMs, toInt(modelsJsonTimeoutRaw, 120_000));
 }
 
 describe("resolveLiveModelsJsonTimeoutMs", () => {
   it("defaults models.json preparation to a longer setup timeout", () => {
-    expect(resolveLiveModelsJsonTimeoutMs(undefined, 45_000)).toBe(180_000);
+    expect(resolveLiveModelsJsonTimeoutMs(undefined, 45_000)).toBe(120_000);
   });
 
   it("never goes below the shared live setup timeout", () => {

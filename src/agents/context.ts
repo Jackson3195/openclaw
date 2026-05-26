@@ -219,21 +219,9 @@ function primeConfiguredContextWindows(): OpenClawConfig | undefined {
   }
 }
 
-function resolveContextWindowLoadScopeKey(providerIds: readonly string[] | undefined): string {
-  const scoped = providerIds
-    ?.map((value) => normalizeProviderId(value))
-    .filter(Boolean)
-    .toSorted((left, right) => left.localeCompare(right));
-  return scoped?.length ? scoped.join(",") : "*";
-}
-
-function ensureContextWindowCacheLoaded(options?: {
-  providerDiscoveryProviderIds?: readonly string[];
-}): Promise<void> {
-  const scopeKey = resolveContextWindowLoadScopeKey(options?.providerDiscoveryProviderIds);
-  const existing = CONTEXT_WINDOW_RUNTIME_STATE.loadPromises.get(scopeKey);
-  if (existing) {
-    return existing;
+function ensureContextWindowCacheLoaded(): Promise<void> {
+  if (CONTEXT_WINDOW_RUNTIME_STATE.loadPromise) {
+    return CONTEXT_WINDOW_RUNTIME_STATE.loadPromise;
   }
 
   const cfg = primeConfiguredContextWindows();
@@ -241,17 +229,9 @@ function ensureContextWindowCacheLoaded(options?: {
     return Promise.resolve();
   }
 
-  const pending = (async () => {
+  CONTEXT_WINDOW_RUNTIME_STATE.loadPromise = (async () => {
     try {
-      await (
-        await loadModelsConfigRuntime()
-      ).ensureOpenClawModelsJson(
-        cfg,
-        undefined,
-        options?.providerDiscoveryProviderIds
-          ? { providerDiscoveryProviderIds: options.providerDiscoveryProviderIds }
-          : undefined,
-      );
+      await (await loadModelsConfigRuntime()).ensureOpenClawModelsJson(cfg);
     } catch {
       // Continue with best-effort discovery/overrides.
     }
@@ -283,16 +263,12 @@ function ensureContextWindowCacheLoaded(options?: {
   })().catch(() => {
     // Keep lookup best-effort.
   });
-  CONTEXT_WINDOW_RUNTIME_STATE.loadPromises.set(scopeKey, pending);
-  if (scopeKey === "*") {
-    CONTEXT_WINDOW_RUNTIME_STATE.loadPromise = pending;
-  }
-  return pending;
+  return CONTEXT_WINDOW_RUNTIME_STATE.loadPromise;
 }
 
 export function lookupContextTokens(
   modelId?: string,
-  options?: { allowAsyncLoad?: boolean; providerDiscoveryProviderIds?: readonly string[] },
+  options?: { allowAsyncLoad?: boolean },
 ): number | undefined {
   if (!modelId) {
     return undefined;
@@ -303,11 +279,7 @@ export function lookupContextTokens(
     primeConfiguredContextWindows();
   } else {
     // Best-effort: kick off loading on demand, but don't block lookups.
-    void ensureContextWindowCacheLoaded(
-      options?.providerDiscoveryProviderIds
-        ? { providerDiscoveryProviderIds: options.providerDiscoveryProviderIds }
-        : undefined,
-    );
+    void ensureContextWindowCacheLoaded();
   }
   return lookupCachedContextTokens(modelId);
 }
@@ -499,7 +471,6 @@ export function resolveContextTokensForModel(params: {
     model: params.model,
   });
   const explicitProvider = params.provider?.trim();
-  const discoveryProviderIds = explicitProvider && ref ? ([ref.provider] as const) : undefined;
   if (ref) {
     const modelParams = resolveConfiguredModelParams(params.cfg, ref.provider, ref.model);
     if (modelParams?.context1m === true && isAnthropic1MModel(ref.provider, ref.model)) {
@@ -543,10 +514,7 @@ export function resolveContextTokensForModel(params: {
   if (params.provider && ref && !ref.model.includes("/")) {
     const qualifiedResult = lookupContextTokens(
       `${normalizeProviderId(ref.provider)}/${ref.model}`,
-      {
-        allowAsyncLoad: params.allowAsyncLoad,
-        ...(discoveryProviderIds ? { providerDiscoveryProviderIds: discoveryProviderIds } : {}),
-      },
+      { allowAsyncLoad: params.allowAsyncLoad },
     );
     if (qualifiedResult !== undefined) {
       return qualifiedResult;
@@ -557,7 +525,6 @@ export function resolveContextTokensForModel(params: {
   // (e.g. "google/gemini-2.5-pro") this IS the raw discovery cache key.
   const bareResult = lookupContextTokens(params.model, {
     allowAsyncLoad: params.allowAsyncLoad,
-    ...(discoveryProviderIds ? { providerDiscoveryProviderIds: discoveryProviderIds } : {}),
   });
   if (bareResult !== undefined) {
     return bareResult;

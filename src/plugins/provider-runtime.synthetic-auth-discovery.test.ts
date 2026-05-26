@@ -61,9 +61,7 @@ vi.mock("./providers.js", () => ({
       ? ["ollama"]
       : provider === "anthropic-vertex"
         ? ["anthropic-vertex"]
-        : provider === "deepseek"
-          ? ["deepseek"]
-          : [],
+        : [],
   ),
 }));
 
@@ -109,28 +107,5 @@ describe("resolveProviderSyntheticAuthWithPlugin", () => {
       source: "models.providers.ollama-remote (synthetic local key)",
       mode: "api-key",
     });
-  });
-
-  it("does not fall back to broad discovery when the provider owner is known", () => {
-    resolvePluginDiscoveryProvidersRuntime.mockClear();
-
-    expect(
-      resolveProviderSyntheticAuthWithPlugin({
-        provider: "deepseek",
-        context: {
-          config: undefined,
-          provider: "deepseek",
-          providerConfig: undefined,
-        },
-      }),
-    ).toBeUndefined();
-
-    expect(resolvePluginDiscoveryProvidersRuntime).toHaveBeenCalledTimes(1);
-    expect(resolvePluginDiscoveryProvidersRuntime).toHaveBeenCalledWith(
-      expect.objectContaining({
-        onlyPluginIds: ["deepseek"],
-        discoveryEntriesOnly: true,
-      }),
-    );
   });
 });

@@ -337,14 +337,12 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
   - install/update smoke against the published beta channel
   - Docker install/update coverage that exercises the published beta package
   - published npm Telegram proof: dispatch Actions > `NPM Telegram Beta E2E`
-    from `main` with `source=npm`, `package_spec=openclaw@<beta-version>`,
-    and `provider_mode=mock-openai`, and require success. Before publishing,
-    use the same workflow with `source=ref` and `package_ref=<branch-or-sha>`
-    for focused tarball-backed Telegram preflight. This workflow is
+    from `main` with `package_spec=openclaw@<beta-version>` and
+    `provider_mode=mock-openai`, and require success. This workflow is
     maintainer-dispatched and intentionally has no `npm-release` approval gate;
-    `qa-live-shared` only supplies the shared QA secrets. The npm source is the
-    default button path for installed-package onboarding, Telegram setup, and
-    real Telegram E2E against the exact published npm package.
+    `qa-live-shared` only supplies the shared QA secrets. This is the default
+    button path for installed-package onboarding, Telegram setup, and real
+    Telegram E2E against the published npm package.
     Use the local `pnpm test:docker:npm-telegram-live` lane with the matching
     `OPENCLAW_NPM_TELEGRAM_PACKAGE_SPEC` and Convex CI env only as a fallback
     or debugging path.
@@ -396,27 +394,6 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
   differs materially from beta, or the operator explicitly asks for full
   retesting.
 - If any required build, packaging step, or release workflow is red, do not say the release is ready.
-
-## Record release evidence with npm provenance
-
-- Every release validation evidence report should identify whether it matches a
-  published npm package. When dispatching `.github/workflows/full-release-validation.yml`
-  for a package that is already published or expected to be published before
-  evidence is finalized, pass `evidence_package_spec=openclaw@<version>`.
-- When the post-publish Telegram npm lane is part of the same full validation,
-  also pass `npm_telegram_package_spec=openclaw@<version>` so the validation
-  proves the exact registry package, not only a branch/ref tarball.
-- If a full validation was started before the npm package existed, regenerate
-  the private evidence after publish with
-  `openclaw/releases-private/.github/workflows/openclaw-release-evidence-from-full-validation.yml`
-  and pass `package_spec=openclaw@<version>`, the original
-  `full_validation_run_id`, and a human release id such as `YYYY.M.D`.
-- Use SHA evidence ids for immutable debugging, but also create/update the
-  human stable evidence bucket (`evidence/YYYY.M.D/`) after stable publish so
-  maintainers can find the final npm/release proof quickly.
-- Do not claim npm proof from a ref-backed or local tarball-backed run. Label
-  those as pre-publish package/tarball proof, and keep the npm registry proof
-  tied to `source=npm` or `package_spec=openclaw@<published-version>`.
 
 ## Use the right auth flow
 
@@ -651,11 +628,6 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
     `appcast.xml` artifact and do not update the shared production feed unless a
     separate beta feed exists.
 32. After publish, verify npm and the attached release artifacts.
-33. After any beta or stable npm publish, ensure the private release evidence
-    report includes `package_spec=openclaw@<published-version>` and shows the
-    npm package match. If the original full validation omitted the package spec,
-    rerun the private evidence generation workflow with the same
-    `full_validation_run_id` and the published package spec.
 
 ## GHSA advisory work
 
