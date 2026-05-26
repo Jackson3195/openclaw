@@ -526,7 +526,6 @@ async function readSpawnedChildRow(params: {
     "sessions.list",
     {
       spawnedBy: params.parentSessionKey,
-      includeLastMessage: true,
       limit: 20,
     },
     { timeoutMs: params.timeoutMs ?? 10_000 },
@@ -538,6 +537,13 @@ async function readSpawnedChildRow(params: {
   return sessions
     .map((entry) => asRecord(entry))
     .find((entry): entry is Record<string, unknown> => entry?.key === params.childSessionKey);
+}
+
+function isActiveCodexSubagentRow(row: Record<string, unknown> | undefined): boolean {
+  if (!row) {
+    return false;
+  }
+  return row.hasActiveSubagentRun === true || row.subagentRunState === "active";
 }
 
 async function waitForCodexSubagentStarted(params: {
@@ -557,14 +563,12 @@ async function waitForCodexSubagentStarted(params: {
         parentSessionKey: params.parentSessionKey,
         timeoutMs: Math.min(30_000, Math.max(10_000, deadline - Date.now())),
       });
-      if (
-        lastRow &&
-        params.events.some(
-          (event) =>
-            event.sessionKey === params.childSessionKey &&
-            event.stream === "codex_app_server.lifecycle",
-        )
-      ) {
+      const hasLifecycleEvent = params.events.some(
+        (event) =>
+          event.sessionKey === params.childSessionKey &&
+          event.stream === "codex_app_server.lifecycle",
+      );
+      if (lastRow && (hasLifecycleEvent || isActiveCodexSubagentRow(lastRow))) {
         return lastRow;
       }
     } catch (error) {

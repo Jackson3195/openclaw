@@ -12,7 +12,7 @@ function withTarball(
   files: Record<string, string>,
   testBody: (tarball: string) => void,
   version = "0.0.0",
-  includeDefaultUi = true,
+  options: { includeControlUi?: boolean } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "openclaw-package-tarball-test-"));
   try {
@@ -23,16 +23,15 @@ function withTarball(
       join(packageRoot, "dist", "postinstall-inventory.json"),
       JSON.stringify(inventory),
     );
-    const packageFiles = {
-      ...(includeDefaultUi
-        ? {
-            "dist/control-ui/assets/index.js": "console.log('openclaw');\n",
-            "dist/control-ui/index.html": '<!doctype html><div id="root"></div>\n',
-          }
-        : {}),
-      ...files,
-    };
-    for (const [relativePath, body] of Object.entries(packageFiles)) {
+    const tarFiles =
+      options.includeControlUi === false
+        ? files
+        : {
+            "dist/control-ui/index.html": "<!doctype html><openclaw-app></openclaw-app>",
+            "dist/control-ui/assets/app.js": "console.log('ok');\n",
+            ...files,
+          };
+    for (const [relativePath, body] of Object.entries(tarFiles)) {
       const filePath = join(packageRoot, relativePath);
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, body);
@@ -95,32 +94,34 @@ describe("check-openclaw-package-tarball", () => {
     );
   });
 
-  it("rejects packaged JS imports that point at missing dist chunks", () => {
+  it("rejects dist files that import missing relative chunks", () => {
     withTarball(
       ["dist/cli/run-main.js"],
-      { "dist/cli/run-main.js": 'await import("../memory-state-CcqRgDZU.js");\n' },
+      { "dist/cli/run-main.js": 'await import("../memory-state-old.js");\n' },
       (tarball) => {
         const result = spawnSync("node", [CHECK_SCRIPT, tarball], { encoding: "utf8" });
 
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain(
-          "missing packaged dist import target ../memory-state-CcqRgDZU.js from dist/cli/run-main.js",
+          "dist/cli/run-main.js imports missing dist/memory-state-old.js",
         );
       },
+      "2026.4.27",
     );
   });
 
-  it("accepts packaged JS imports that resolve to shipped dist chunks", () => {
+  it("accepts dist files whose relative chunks are present", () => {
     withTarball(
-      ["dist/cli/run-main.js", "dist/memory-state-DwGdReW4.js"],
+      ["dist/cli/run-main.js", "dist/memory-state-current.js"],
       {
-        "dist/cli/run-main.js": 'await import("../memory-state-DwGdReW4.js");\n',
-        "dist/memory-state-DwGdReW4.js": "export {};\n",
+        "dist/cli/run-main.js": 'await import("../memory-state-current.js");\n',
+        "dist/memory-state-current.js": "export {};\n",
       },
       (tarball) => {
         const result = spawnSync("node", [CHECK_SCRIPT, tarball], { encoding: "utf8" });
 
         expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout).toContain("OpenClaw package tarball integrity passed.");
       },
       "2026.4.27",
     );
@@ -142,6 +143,24 @@ describe("check-openclaw-package-tarball", () => {
         );
       },
       "2026.4.27",
+    );
+  });
+
+  it("rejects missing Control UI assets", () => {
+    withTarball(
+      ["dist/index.js"],
+      { "dist/index.js": "export {};\n" },
+      (tarball) => {
+        const result = spawnSync("node", [CHECK_SCRIPT, tarball], { encoding: "utf8" });
+
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain("missing required tar entry dist/control-ui/index.html");
+        expect(result.stderr).toContain(
+          "missing required tar entries under dist/control-ui/assets/",
+        );
+      },
+      "2026.4.27",
+      { includeControlUi: false },
     );
   });
 
@@ -187,26 +206,6 @@ describe("check-openclaw-package-tarball", () => {
         expect(result.stdout).toContain("OpenClaw package tarball integrity passed.");
       },
       "2026.4.26",
-    );
-  });
-
-  it("rejects tarballs missing Control UI assets", () => {
-    withTarball(
-      ["dist/index.js"],
-      { "dist/index.js": "export {};\n" },
-      (tarball) => {
-        const result = spawnSync("node", [CHECK_SCRIPT, tarball], { encoding: "utf8" });
-
-        expect(result.status).not.toBe(0);
-        expect(result.stderr).toContain(
-          "missing required package tar entry dist/control-ui/index.html",
-        );
-        expect(result.stderr).toContain(
-          "missing required package tar entries under dist/control-ui/assets/",
-        );
-      },
-      "2026.4.27",
-      false,
     );
   });
 });
