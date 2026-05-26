@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { createLazyImportLoader, type LazyPromiseLoader } from "../shared/lazy-promise.js";
 import { MODEL_CONTEXT_TOKEN_CACHE } from "./context-cache.js";
 
 const CONTEXT_WINDOW_RUNTIME_STATE_KEY = Symbol.for("openclaw.contextWindowRuntimeState");
@@ -9,7 +10,7 @@ type ContextWindowRuntimeState = {
   configuredConfig: OpenClawConfig | undefined;
   configLoadFailures: number;
   nextConfigLoadAttemptAtMs: number;
-  modelsConfigRuntimePromise: Promise<typeof import("./models-config.runtime.js")> | undefined;
+  modelsConfigRuntimeLoader: LazyPromiseLoader<typeof import("./models-config.runtime.js")>;
 };
 
 export const CONTEXT_WINDOW_RUNTIME_STATE = (() => {
@@ -23,7 +24,7 @@ export const CONTEXT_WINDOW_RUNTIME_STATE = (() => {
       configuredConfig: undefined,
       configLoadFailures: 0,
       nextConfigLoadAttemptAtMs: 0,
-      modelsConfigRuntimePromise: undefined,
+      modelsConfigRuntimeLoader: createLazyImportLoader(() => import("./models-config.runtime.js")),
     };
   }
   return globalState[CONTEXT_WINDOW_RUNTIME_STATE_KEY];
@@ -35,6 +36,6 @@ export function resetContextWindowCacheForTest(): void {
   CONTEXT_WINDOW_RUNTIME_STATE.configuredConfig = undefined;
   CONTEXT_WINDOW_RUNTIME_STATE.configLoadFailures = 0;
   CONTEXT_WINDOW_RUNTIME_STATE.nextConfigLoadAttemptAtMs = 0;
-  CONTEXT_WINDOW_RUNTIME_STATE.modelsConfigRuntimePromise = undefined;
+  CONTEXT_WINDOW_RUNTIME_STATE.modelsConfigRuntimeLoader.clear();
   MODEL_CONTEXT_TOKEN_CACHE.clear();
 }

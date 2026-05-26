@@ -1,21 +1,30 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { resolveGatewayStartupPluginIds } from "../plugins/gateway-startup-plugin-ids.js";
-import { resolveRuntimePluginRegistry } from "../plugins/loader.js";
+import { getCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
 import { getActivePluginRuntimeSubagentMode } from "../plugins/runtime.js";
+import { ensureStandaloneRuntimePluginRegistryLoaded } from "../plugins/runtime/standalone-runtime-registry-loader.js";
 import { resolveUserPath } from "../utils.js";
 
-function resolveRuntimePluginIds(params: {
+type StartupScopedPluginSnapshot = NonNullable<
+  ReturnType<typeof getCurrentPluginMetadataSnapshot>
+> & {
+  startup?: {
+    pluginIds?: readonly unknown[];
+  };
+};
+
+function resolveStartupPluginIdsFromCurrentSnapshot(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
-}): readonly string[] | undefined {
-  if (!params.config) {
-    return undefined;
-  }
-  return resolveGatewayStartupPluginIds({
+}): string[] | undefined {
+  const snapshot = getCurrentPluginMetadataSnapshot({
     config: params.config,
     workspaceDir: params.workspaceDir,
-    env: process.env,
-  });
+  }) as StartupScopedPluginSnapshot | undefined;
+  const pluginIds = snapshot?.startup?.pluginIds;
+  if (!Array.isArray(pluginIds)) {
+    return undefined;
+  }
+  return pluginIds.filter((pluginId): pluginId is string => typeof pluginId === "string");
 }
 
 export function ensureRuntimePluginsLoaded(params: {
@@ -27,27 +36,22 @@ export function ensureRuntimePluginsLoaded(params: {
     typeof params.workspaceDir === "string" && params.workspaceDir.trim()
       ? resolveUserPath(params.workspaceDir)
       : undefined;
+  const startupPluginIds = resolveStartupPluginIdsFromCurrentSnapshot({
+    config: params.config,
+    workspaceDir,
+  });
   const allowGatewaySubagentBinding =
     params.allowGatewaySubagentBinding === true ||
     getActivePluginRuntimeSubagentMode() === "gateway-bindable";
-  const loadOptions = {
-    config: params.config,
-    workspaceDir,
-    ...(params.config
-      ? {
-          onlyPluginIds: [
-            ...(resolveRuntimePluginIds({
-              config: params.config,
-              workspaceDir,
-            }) ?? []),
-          ],
-        }
-      : {}),
-    runtimeOptions: allowGatewaySubagentBinding
-      ? {
-          allowGatewaySubagentBinding: true,
-        }
-      : undefined,
-  };
-  resolveRuntimePluginRegistry(loadOptions);
+  ensureStandaloneRuntimePluginRegistryLoaded({
+    requiredPluginIds: startupPluginIds,
+    loadOptions: {
+      config: params.config,
+      workspaceDir,
+      ...(startupPluginIds === undefined ? {} : { onlyPluginIds: startupPluginIds }),
+      runtimeOptions: allowGatewaySubagentBinding
+        ? { allowGatewaySubagentBinding: true }
+        : undefined,
+    },
+  });
 }

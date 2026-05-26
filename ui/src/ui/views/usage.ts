@@ -8,9 +8,8 @@ import {
   formatCost,
   formatIsoDate,
   formatTokens,
-  getZonedHour,
   renderUsageMosaic,
-  setToHourEnd,
+  sessionTouchesSelectedHours,
 } from "./usage-metrics.ts";
 import {
   addQueryToken,
@@ -171,35 +170,11 @@ export function renderUsage(props: UsageProps) {
         })
       : sortedSessions;
 
-  const sessionTouchesHours = (session: UsageSessionEntry, hours: number[]): boolean => {
-    if (hours.length === 0) {
-      return true;
-    }
-    const usage = session.usage;
-    const start = usage?.firstActivity ?? session.updatedAt;
-    const end = usage?.lastActivity ?? session.updatedAt;
-    if (!start || !end) {
-      return false;
-    }
-    const startMs = Math.min(start, end);
-    const endMs = Math.max(start, end);
-    let cursor = startMs;
-    while (cursor <= endMs) {
-      const date = new Date(cursor);
-      const hour = getZonedHour(date, filters.timeZone);
-      if (hours.includes(hour)) {
-        return true;
-      }
-      const nextHour = setToHourEnd(date, filters.timeZone);
-      const nextMs = Math.min(nextHour.getTime(), endMs);
-      cursor = nextMs + 1;
-    }
-    return false;
-  };
-
   const hourFilteredSessions =
     filters.selectedHours.length > 0
-      ? dayFilteredSessions.filter((s) => sessionTouchesHours(s, filters.selectedHours))
+      ? dayFilteredSessions.filter((s) =>
+          sessionTouchesSelectedHours(s, filters.selectedHours, filters.timeZone),
+        )
       : dayFilteredSessions;
 
   // Filter sessions by query (client-side)
@@ -376,11 +351,9 @@ export function renderUsage(props: UsageProps) {
       >
         <summary>
           <span>${label}</span>
-          ${
-            selectedCount > 0
-              ? html`<span class="usage-filter-badge">${selectedCount}</span>`
-              : html` <span class="usage-filter-badge">${t("usage.filters.all")}</span> `
-          }
+          ${selectedCount > 0
+            ? html`<span class="usage-filter-badge">${selectedCount}</span>`
+            : html` <span class="usage-filter-badge">${t("usage.filters.all")}</span> `}
         </summary>
         <div class="usage-filter-popover">
           <div class="usage-filter-actions">
@@ -449,21 +422,16 @@ export function renderUsage(props: UsageProps) {
         <div class="usage-header-row">
           <div class="usage-header-title">
             <div class="card-title usage-section-title">${t("usage.filters.title")}</div>
-            ${
-              data.loading
-                ? html`<span class="usage-refresh-indicator">${t("usage.loading.badge")}</span>`
-                : nothing
-            }
-            ${
-              isEmpty
-                ? html`<span class="usage-query-hint">${t("usage.empty.hint")}</span>`
-                : nothing
-            }
+            ${data.loading
+              ? html`<span class="usage-refresh-indicator">${t("usage.loading.badge")}</span>`
+              : nothing}
+            ${isEmpty
+              ? html`<span class="usage-query-hint">${t("usage.empty.hint")}</span>`
+              : nothing}
           </div>
           <div class="usage-header-metrics">
-            ${
-              displayTotals
-                ? html`
+            ${displayTotals
+              ? html`
                   <span class="usage-metric-badge">
                     <strong>${formatTokens(displayTotals.totalTokens)}</strong>
                     ${t("usage.metrics.tokens")}
@@ -474,15 +442,12 @@ export function renderUsage(props: UsageProps) {
                   </span>
                   <span class="usage-metric-badge">
                     <strong>${displaySessionCount}</strong>
-                    ${
-                      displaySessionCount === 1
-                        ? t("usage.metrics.session")
-                        : t("usage.metrics.sessions")
-                    }
+                    ${displaySessionCount === 1
+                      ? t("usage.metrics.session")
+                      : t("usage.metrics.sessions")}
                   </span>
                 `
-                : nothing
-            }
+              : nothing}
             <button
               class="btn btn--sm usage-pin-btn ${display.headerPinned ? "active" : ""}"
               title=${display.headerPinned ? t("usage.filters.unpin") : t("usage.filters.pin")}
@@ -664,24 +629,20 @@ export function renderUsage(props: UsageProps) {
               >
                 ${t("usage.query.apply")}
               </button>
-              ${
-                hasDraftQuery || hasQuery
-                  ? html`
+              ${hasDraftQuery || hasQuery
+                ? html`
                     <button class="btn btn--sm" @click=${filterActions.onClearQuery}>
                       ${t("usage.filters.clear")}
                     </button>
                   `
-                  : nothing
-              }
+                : nothing}
               <span class="usage-query-hint">
-                ${
-                  hasQuery
-                    ? t("usage.query.matching", {
-                        shown: String(filteredSessions.length),
-                        total: String(totalSessions),
-                      })
-                    : t("usage.query.inRange", { total: String(totalSessions) })
-                }
+                ${hasQuery
+                  ? t("usage.query.matching", {
+                      shown: String(filteredSessions.length),
+                      total: String(totalSessions),
+                    })
+                  : t("usage.query.inRange", { total: String(totalSessions) })}
               </span>
             </div>
           </div>
@@ -693,9 +654,8 @@ export function renderUsage(props: UsageProps) {
             ${renderFilterSelect("tool", t("usage.filters.tool"), toolOptions)}
             <span class="usage-query-hint">${t("usage.query.tip")}</span>
           </div>
-          ${
-            queryTerms.length > 0
-              ? html`
+          ${queryTerms.length > 0
+            ? html`
                 <div class="usage-query-chips">
                   ${queryTerms.map((term) => {
                     const label = term.raw;
@@ -716,11 +676,9 @@ export function renderUsage(props: UsageProps) {
                   })}
                 </div>
               `
-              : nothing
-          }
-          ${
-            querySuggestions.length > 0
-              ? html`
+            : nothing}
+          ${querySuggestions.length > 0
+            ? html`
                 <div class="usage-query-suggestions">
                   ${querySuggestions.map(
                     (suggestion) => html`
@@ -737,35 +695,29 @@ export function renderUsage(props: UsageProps) {
                   )}
                 </div>
               `
-              : nothing
-          }
-          ${
-            queryWarnings.length > 0
-              ? html`
+            : nothing}
+          ${queryWarnings.length > 0
+            ? html`
                 <div class="callout warning usage-callout usage-callout--tight">
                   ${queryWarnings.join(" · ")}
                 </div>
               `
-              : nothing
-          }
+            : nothing}
         </div>
 
-        ${
-          data.error ? html`<div class="callout danger usage-callout">${data.error}</div>` : nothing
-        }
-        ${
-          data.sessionsLimitReached
-            ? html`
+        ${data.error
+          ? html`<div class="callout danger usage-callout">${data.error}</div>`
+          : nothing}
+        ${data.sessionsLimitReached
+          ? html`
               <div class="callout warning usage-callout">${t("usage.sessions.limitReached")}</div>
             `
-            : nothing
-        }
+          : nothing}
       </section>
 
-      ${
-        isEmpty
-          ? renderUsageEmptyState(filterActions.onRefresh)
-          : html`
+      ${isEmpty
+        ? renderUsageEmptyState(filterActions.onRefresh)
+        : html`
             ${renderUsageInsights(
               displayTotals,
               activeAggregates,
@@ -793,11 +745,9 @@ export function renderUsage(props: UsageProps) {
                     displayActions.onDailyChartModeChange,
                     filterActions.onSelectDay,
                   )}
-                  ${
-                    displayTotals
-                      ? renderCostBreakdownCompact(displayTotals, display.chartMode)
-                      : nothing
-                  }
+                  ${displayTotals
+                    ? renderCostBreakdownCompact(displayTotals, display.chartMode)
+                    : nothing}
                 </div>
                 ${renderSessionsCard(
                   filteredSessions,
@@ -817,9 +767,8 @@ export function renderUsage(props: UsageProps) {
                   filterActions.onClearSessions,
                 )}
               </div>
-              ${
-                primarySelectedEntry
-                  ? html`<div class="usage-grid-column">
+              ${primarySelectedEntry
+                ? html`<div class="usage-grid-column">
                     ${renderSessionDetailPanel(
                       primarySelectedEntry,
                       detail.timeSeries,
@@ -849,11 +798,9 @@ export function renderUsage(props: UsageProps) {
                       filterActions.onClearSessions,
                     )}
                   </div>`
-                  : nothing
-              }
+                : nothing}
             </div>
-          `
-      }
+          `}
     </div>
   `;
 }
