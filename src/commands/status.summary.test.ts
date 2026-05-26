@@ -200,18 +200,4 @@ describe("getStatusSummary", () => {
 
     expect(summary.sessions.recent[0]?.runtime).toBe("OpenAI Codex");
   });
-
-  it("includes the selected agent runtime on recent sessions", async () => {
-    vi.mocked(statusSummaryRuntime.resolveSessionRuntimeLabel).mockReturnValue("OpenAI Codex");
-    statusSummaryMocks.readSessionStoreReadOnly.mockReturnValue({
-      "agent:main:main": {
-        sessionId: "session-1",
-        updatedAt: Date.now(),
-      },
-    });
-
-    const summary = await getStatusSummary();
-
-    expect(summary.sessions.recent[0]?.runtime).toBe("OpenAI Codex");
-  });
 });

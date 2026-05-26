@@ -9,7 +9,6 @@ type TsdownConfigEntry = {
   };
   entry?: Record<string, string> | string[];
   inputOptions?: TsdownInputOptions;
-  outputOptions?: TsdownOutputOptions;
   outDir?: string;
 };
 
@@ -39,24 +38,6 @@ type TsdownExternalFunction = (
   parentId: string | undefined,
   isResolved: boolean,
 ) => boolean | null | undefined;
-
-type TsdownOutputOptions = (
-  options: {
-    entryFileNames?:
-      | string
-      | ((chunkInfo: { facadeModuleId?: string; moduleIds: string[]; name?: string }) => string);
-    chunkFileNames?: string | ((chunkInfo: { moduleIds: string[] }) => string);
-  },
-  format?: unknown,
-  context?: unknown,
-) =>
-  | {
-      entryFileNames?:
-        | string
-        | ((chunkInfo: { facadeModuleId?: string; moduleIds: string[]; name?: string }) => string);
-      chunkFileNames?: string | ((chunkInfo: { moduleIds: string[] }) => string);
-    }
-  | undefined;
 
 function asConfigArray(config: unknown): TsdownConfigEntry[] {
   return Array.isArray(config) ? (config as TsdownConfigEntry[]) : [config as TsdownConfigEntry];
@@ -234,67 +215,6 @@ describe("tsdown config", () => {
     }
     const externalize = external;
     expect(externalize("qrcode-terminal/lib/main.js", undefined, false)).toBe(true);
-  });
-
-  it("routes externalized bundled plugin chunks under their excluded dist subtree", () => {
-    const configured = unifiedDistGraph()?.outputOptions?.({
-      entryFileNames: "[name].js",
-      chunkFileNames: "[name]-[hash].js",
-    });
-    const entryFileNames = configured?.entryFileNames;
-    const chunkFileNames = configured?.chunkFileNames;
-
-    expect(typeof entryFileNames).toBe("function");
-    expect(typeof chunkFileNames).toBe("function");
-    expect(
-      (
-        entryFileNames as (chunkInfo: {
-          facadeModuleId?: string;
-          moduleIds: string[];
-          name?: string;
-        }) => string
-      )({
-        facadeModuleId: "/repo/extensions/zalouser/src/setup-surface.ts",
-        moduleIds: [],
-        name: "setup-surface",
-      }),
-    ).toBe("extensions/zalouser/[name].js");
-    expect(
-      (
-        entryFileNames as (chunkInfo: {
-          facadeModuleId?: string;
-          moduleIds: string[];
-          name?: string;
-        }) => string
-      )({
-        facadeModuleId: "/repo/extensions/zalouser/index.ts",
-        moduleIds: [],
-        name: "extensions/zalouser/index",
-      }),
-    ).toBe("[name].js");
-    expect(
-      (chunkFileNames as (chunkInfo: { moduleIds: string[] }) => string)({
-        moduleIds: ["/repo/extensions/feishu/src/client.ts"],
-      }),
-    ).toBe("extensions/feishu/[name]-[hash].js");
-    expect(
-      (chunkFileNames as (chunkInfo: { moduleIds: string[] }) => string)({
-        moduleIds: ["/repo/extensions/telegram/src/api.ts"],
-      }),
-    ).toBe("[name]-[hash].js");
-    expect(
-      (chunkFileNames as (chunkInfo: { moduleIds: string[] }) => string)({
-        moduleIds: ["/repo/extensions/feishu/src/client.ts", "/repo/src/shared/string.ts"],
-      }),
-    ).toBe("extensions/feishu/[name]-[hash].js");
-    expect(
-      (chunkFileNames as (chunkInfo: { moduleIds: string[] }) => string)({
-        moduleIds: [
-          "/repo/extensions/feishu/src/client.ts",
-          "/repo/extensions/telegram/src/api.ts",
-        ],
-      }),
-    ).toBe("[name]-[hash].js");
   });
 
   it("suppresses unresolved imports from extension source", () => {

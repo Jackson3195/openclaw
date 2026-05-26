@@ -3,7 +3,6 @@ import path from "node:path";
 import { defineConfig, type UserConfig } from "tsdown";
 import {
   collectBundledPluginBuildEntries,
-  collectRootPackageExcludedExtensionDirs,
   NON_PACKAGED_BUNDLED_PLUGIN_DIRS,
 } from "./scripts/lib/bundled-plugin-build-entries.mjs";
 import { buildPluginSdkEntrySources } from "./scripts/lib/plugin-sdk-entries.mjs";
@@ -24,29 +23,6 @@ type InputOptionsReturn = InputOptionsFactory extends (
   ? Return
   : never;
 type OnLogFunction = InputOptionsArg extends { onLog?: infer OnLog } ? NonNullable<OnLog> : never;
-type OutputOptionsFactory = Extract<NonNullable<UserConfig["outputOptions"]>, Function>;
-type OutputOptionsArg = OutputOptionsFactory extends (
-  options: infer Options,
-  format: infer _Format,
-  context: infer _Context,
-) => infer _Return
-  ? Options
-  : never;
-type OutputOptionsReturn = OutputOptionsFactory extends (
-  options: infer _Options,
-  format: infer _Format,
-  context: infer _Context,
-) => infer Return
-  ? Return
-  : never;
-type EntryFileNamesFunction = OutputOptionsArg extends { entryFileNames?: infer EntryFileNames }
-  ? Extract<NonNullable<EntryFileNames>, Function>
-  : never;
-type ChunkFileNamesFunction = OutputOptionsArg extends { chunkFileNames?: infer ChunkFileNames }
-  ? Extract<NonNullable<ChunkFileNames>, Function>
-  : never;
-type ChunkFileNameFunction = EntryFileNamesFunction | ChunkFileNamesFunction;
-type ChunkInfo = Parameters<ChunkFileNameFunction>[0];
 type ExternalOptionFunction = (
   id: string,
   parentId: string | undefined,
@@ -141,76 +117,6 @@ function buildInputOptions(options: InputOptionsArg): InputOptionsReturn {
   };
 }
 
-const rootPackageExcludedExtensionDirs = collectRootPackageExcludedExtensionDirs();
-
-function normalizeModuleId(moduleId: string): string {
-  return moduleId.replaceAll("\\", "/");
-}
-
-function resolveExternalizedBundledPluginChunkId(chunkInfo: ChunkInfo): string | null {
-  let pluginId: string | null = null;
-  const moduleIds = [
-    ...(chunkInfo.facadeModuleId ? [chunkInfo.facadeModuleId] : []),
-    ...(chunkInfo.moduleIds ?? []),
-  ];
-  for (const moduleId of moduleIds) {
-    const normalized = normalizeModuleId(moduleId);
-    const match = /(?:^|\/)extensions\/([^/]+)\//u.exec(normalized);
-    if (!match?.[1]) {
-      continue;
-    }
-    if (!rootPackageExcludedExtensionDirs.has(match[1])) {
-      return null;
-    }
-    if (pluginId && pluginId !== match[1]) {
-      return null;
-    }
-    pluginId = match[1];
-  }
-  return pluginId;
-}
-
-function externalizedBundledPluginFileNamePattern(
-  pluginId: string,
-  chunkInfo: ChunkInfo,
-  fallback: string,
-): string {
-  return chunkInfo.name?.startsWith(`extensions/${pluginId}/`)
-    ? fallback
-    : `extensions/${pluginId}/${fallback}`;
-}
-
-function buildOutputOptions(options: OutputOptionsArg): OutputOptionsReturn {
-  const previousEntryFileNames = options.entryFileNames;
-  const previousChunkFileNames = options.chunkFileNames;
-
-  return {
-    ...options,
-    entryFileNames(chunkInfo: ChunkInfo) {
-      const fallback =
-        typeof previousEntryFileNames === "function"
-          ? previousEntryFileNames(chunkInfo)
-          : (previousEntryFileNames ?? "[name].js");
-      const externalizedPluginId = resolveExternalizedBundledPluginChunkId(chunkInfo);
-      if (externalizedPluginId) {
-        return externalizedBundledPluginFileNamePattern(externalizedPluginId, chunkInfo, fallback);
-      }
-      return fallback;
-    },
-    chunkFileNames(chunkInfo: ChunkInfo) {
-      const fallback =
-        typeof previousChunkFileNames === "function"
-          ? previousChunkFileNames(chunkInfo)
-          : (previousChunkFileNames ?? "[name]-[hash].js");
-      const externalizedPluginId = resolveExternalizedBundledPluginChunkId(chunkInfo);
-      if (externalizedPluginId) {
-        return externalizedBundledPluginFileNamePattern(externalizedPluginId, chunkInfo, fallback);
-      }
-      return fallback;
-    },
-  };
-}
-
 function nodeBuildConfig(config: UserConfig): UserConfig {
   return {
     ...config,
@@ -219,7 +125,6 @@ function nodeBuildConfig(config: UserConfig): UserConfig {
     platform: "node",
     sourcemap: OUTPUT_SOURCE_MAPS,
     inputOptions: buildInputOptions,
-    outputOptions: buildOutputOptions,
   };
 }
 

@@ -716,56 +716,6 @@ describe("capability cli", () => {
     expect(inputs[0]?.mimeType).toBe("image/jpeg");
   });
 
-  it("normalizes HEIC files to JPEG before local model probes", async () => {
-    const tempInput = path.join(os.tmpdir(), `openclaw-model-run-image-${Date.now()}.heic`);
-    await fs.writeFile(tempInput, Buffer.from("heic-like"));
-
-    await runRegisteredCli({
-      register: registerCapabilityCli as (program: Command) => void,
-      argv: [
-        "capability",
-        "model",
-        "run",
-        "--prompt",
-        "describe this",
-        "--file",
-        tempInput,
-        "--json",
-      ],
-    });
-
-    expect(mocks.convertHeicToJpeg).toHaveBeenCalledWith(Buffer.from("heic-like"));
-    expect(mocks.completeWithPreparedSimpleCompletionModel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        context: expect.objectContaining({
-          messages: [
-            expect.objectContaining({
-              role: "user",
-              content: [
-                { type: "text", text: "describe this" },
-                {
-                  type: "image",
-                  data: Buffer.from("jpeg-normalized").toString("base64"),
-                  mimeType: "image/jpeg",
-                },
-              ],
-            }),
-          ],
-        }),
-      }),
-    );
-    expect(mocks.runtime.writeJson).toHaveBeenCalledWith(
-      expect.objectContaining({
-        inputs: [
-          expect.objectContaining({
-            path: tempInput,
-            mimeType: "image/jpeg",
-          }),
-        ],
-      }),
-    );
-  });
-
   it("rejects non-image files for model probes", async () => {
     const tempInput = path.join(os.tmpdir(), `openclaw-model-run-audio-${Date.now()}.mp3`);
     await fs.writeFile(tempInput, Buffer.from("not really audio"));

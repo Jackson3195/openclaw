@@ -222,10 +222,8 @@ export function createXaiToolPayloadCompatibilityWrapper(
 ): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
   return (model, context, options) => {
-    const transportModel =
-      model.provider === "xai" && model.reasoning ? { ...model, reasoning: false } : model;
     const originalOnPayload = options?.onPayload;
-    return underlying(transportModel, context, {
+    return underlying(model, context, {
       ...options,
       onPayload: (payload) => {
         if (payload && typeof payload === "object") {
@@ -240,7 +238,7 @@ export function createXaiToolPayloadCompatibilityWrapper(
             delete payloadObj.reasoning_effort;
           }
         }
-        return originalOnPayload?.(payload, transportModel);
+        return originalOnPayload?.(payload, model);
       },
     });
   };

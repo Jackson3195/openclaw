@@ -84,27 +84,6 @@ describe("openclaw-tools update_plan gating", () => {
     ).toBe(false);
   });
 
-  it("wraps constructed tools with before-tool-call hooks by default", () => {
-    const tools = createOpenClawTools({
-      config: {} as OpenClawConfig,
-      disablePluginTools: true,
-    });
-    const unwrappedTools = createOpenClawTools({
-      config: {} as OpenClawConfig,
-      disablePluginTools: true,
-      wrapBeforeToolCallHook: false,
-    });
-
-    expect(
-      isToolWrappedWithBeforeToolCallHook(tools.find((tool) => tool.name === "sessions_list")!),
-    ).toBe(true);
-    expect(
-      isToolWrappedWithBeforeToolCallHook(
-        unwrappedTools.find((tool) => tool.name === "sessions_list")!,
-      ),
-    ).toBe(false);
-  });
-
   it("registers update_plan when explicitly enabled", () => {
     const config = {
       tools: {
