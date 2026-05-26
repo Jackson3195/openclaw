@@ -4,6 +4,7 @@ import {
   registerMemoryCapability,
   registerMemoryPromptSection,
 } from "../plugins/memory-state.js";
+import * as memoryCoreAlias from "./memory-core.js";
 import {
   buildActiveMemoryPromptSection,
   listActiveMemoryPublicArtifacts,
