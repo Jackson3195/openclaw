@@ -668,6 +668,7 @@ export type PluginHookCronChangedEvent = {
   deliveryError?: string;
   sessionId?: string;
   sessionKey?: string;
+  runId?: string;
   nextRunAtMs?: number;
   model?: string;
   provider?: string;
