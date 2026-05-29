@@ -8,7 +8,11 @@ const outro = (message: string) => clackOutro(stylePromptTitle(message) ?? messa
 
 export async function doctorCommand(runtime?: RuntimeEnv, options: DoctorOptions = {}) {
   const effectiveRuntime = runtime ?? (await import("../runtime.js")).defaultRuntime;
-  const envSnapshot = { ...process.env };
+  if (options.repair === true || options.yes === true || options.generateGatewayToken === true) {
+    const { assertConfigWriteAllowedInCurrentMode } = await import("../config/config.js");
+    assertConfigWriteAllowedInCurrentMode();
+  }
+
   const { createDoctorPrompter } = await import("../commands/doctor-prompter.js");
   const { printWizardHeader } = await import("../commands/onboard-helpers.js");
   const prompter = createDoctorPrompter({ runtime: effectiveRuntime, options });
@@ -36,9 +40,12 @@ export async function doctorCommand(runtime?: RuntimeEnv, options: DoctorOptions
 
   const { maybeRepairUiProtocolFreshness } = await import("../commands/doctor-ui.js");
   const { noteSourceInstallIssues } = await import("../commands/doctor-install.js");
+  const { noteStalePluginRuntimeSymlinks } =
+    await import("../commands/doctor/shared/plugin-runtime-symlinks.js");
   const { noteStartupOptimizationHints } = await import("../commands/doctor-platform-notes.js");
   await maybeRepairUiProtocolFreshness(effectiveRuntime, prompter);
   noteSourceInstallIssues(root);
+  await noteStalePluginRuntimeSymlinks(root);
   noteStartupOptimizationHints();
 
   const { loadAndMaybeMigrateDoctorConfig } = await import("../commands/doctor-config-flow.js");
@@ -58,7 +65,6 @@ export async function doctorCommand(runtime?: RuntimeEnv, options: DoctorOptions
     cfgForPersistence: structuredClone(configResult.cfg),
     sourceConfigValid: configResult.sourceConfigValid ?? true,
     configPath: configResult.path ?? CONFIG_PATH,
-    env: envSnapshot,
   };
   const { runDoctorHealthContributions } = await import("./doctor-health-contributions.js");
   await runDoctorHealthContributions(ctx);

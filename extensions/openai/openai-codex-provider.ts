@@ -1,17 +1,18 @@
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type {
   ProviderAuthContext,
+  ProviderAuthResult,
   ProviderResolveDynamicModelContext,
   ProviderRuntimeModel,
 } from "openclaw/plugin-sdk/plugin-entry";
 import {
   CODEX_CLI_PROFILE_ID,
+  createProviderApiKeyAuthMethod,
   ensureAuthProfileStoreForLocalUpdate,
   listProfilesForProvider,
   type OAuthCredential,
 } from "openclaw/plugin-sdk/provider-auth";
 import { buildOauthProviderAuthResult } from "openclaw/plugin-sdk/provider-auth";
-import { loginOpenAICodexOAuth } from "openclaw/plugin-sdk/provider-auth-login";
 import {
   DEFAULT_CONTEXT_TOKENS,
   normalizeModelCompat,
@@ -19,10 +20,15 @@ import {
   type ProviderPlugin,
 } from "openclaw/plugin-sdk/provider-model-shared";
 import { fetchCodexUsage } from "openclaw/plugin-sdk/provider-usage";
-import { normalizeLowercaseStringOrEmpty, readStringValue } from "openclaw/plugin-sdk/text-runtime";
+import {
+  normalizeLowercaseStringOrEmpty,
+  readStringValue,
+} from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   OPENAI_CODEX_DEVICE_PAIRING_HINT,
   OPENAI_CODEX_DEVICE_PAIRING_LABEL,
+  OPENAI_CODEX_API_KEY_BACKUP_HINT,
+  OPENAI_CODEX_API_KEY_BACKUP_LABEL,
   OPENAI_CODEX_LOGIN_HINT,
   OPENAI_CODEX_LOGIN_LABEL,
   OPENAI_CODEX_WIZARD_GROUP,
@@ -36,6 +42,7 @@ import { OPENAI_CODEX_DEFAULT_MODEL } from "./default-models.js";
 import { resolveCodexAuthIdentity } from "./openai-codex-auth-identity.js";
 import { buildOpenAICodexProvider } from "./openai-codex-catalog.js";
 import { loginOpenAICodexDeviceCode } from "./openai-codex-device-code.js";
+import { loginOpenAICodexOAuth } from "./openai-codex-oauth.runtime.js";
 import {
   buildOpenAIResponsesProviderHooks,
   buildOpenAISyntheticCatalogEntry,
@@ -43,8 +50,10 @@ import {
   findCatalogTemplate,
   matchesExactOrPrefix,
 } from "./shared.js";
+import { resolveOpenAICodexThinkingProfile } from "./thinking-policy.js";
 
 const PROVIDER_ID = "openai-codex";
+const OPENAI_PROVIDER_ID = "openai";
 const OPENAI_CODEX_BASE_URL = OPENAI_CODEX_RESPONSES_BASE_URL;
 const OPENAI_CODEX_LOGIN_ASSISTANT_PRIORITY = -30;
 const OPENAI_CODEX_DEVICE_PAIRING_ASSISTANT_PRIORITY = -10;
@@ -97,26 +106,12 @@ const OPENAI_CODEX_GPT_55_PRO_TEMPLATE_MODEL_IDS = [
   OPENAI_CODEX_GPT_54_PRO_MODEL_ID,
   ...OPENAI_CODEX_GPT_54_TEMPLATE_MODEL_IDS,
 ] as const;
-const OPENAI_CODEX_GPT_53_MODEL_ID = "gpt-5.3-codex";
-const OPENAI_CODEX_TEMPLATE_MODEL_IDS = ["gpt-5.2-codex"] as const;
-const OPENAI_CODEX_XHIGH_MODEL_IDS = [
-  OPENAI_CODEX_GPT_55_MODEL_ID,
-  OPENAI_CODEX_GPT_55_PRO_MODEL_ID,
-  OPENAI_CODEX_GPT_54_MODEL_ID,
-  OPENAI_CODEX_GPT_54_PRO_MODEL_ID,
-  OPENAI_CODEX_GPT_53_MODEL_ID,
-  "gpt-5.2-codex",
-  "gpt-5.1-codex",
-] as const;
 const OPENAI_CODEX_MODERN_MODEL_IDS = [
   OPENAI_CODEX_GPT_55_MODEL_ID,
   OPENAI_CODEX_GPT_55_PRO_MODEL_ID,
   OPENAI_CODEX_GPT_54_MODEL_ID,
   OPENAI_CODEX_GPT_54_PRO_MODEL_ID,
   OPENAI_CODEX_GPT_54_MINI_MODEL_ID,
-  "gpt-5.2",
-  "gpt-5.2-codex",
-  OPENAI_CODEX_GPT_53_MODEL_ID,
 ] as const;
 
 function isLegacyCodexCompatBaseUrl(baseUrl?: string): boolean {
@@ -144,6 +139,43 @@ function normalizeCodexTransportFields(params: {
   const baseUrl =
     api === "openai-codex-responses" && useCodexTransport ? OPENAI_CODEX_BASE_URL : params.baseUrl;
   return { api, baseUrl };
+}
+
+function hasImageInput(input: unknown): boolean {
+  return Array.isArray(input) && input.includes("image");
+}
+
+function matchesOpenAICodexImageCapableModel(modelId: string, modelName?: string): boolean {
+  return [modelId, modelName]
+    .filter((value): value is string => typeof value === "string")
+    .some((candidate) => matchesExactOrPrefix(candidate, OPENAI_CODEX_MODERN_MODEL_IDS));
+}
+
+/**
+ * Restore native `["text", "image"]` input capability on resolved Codex rows
+ * for the known modern model IDs (gpt-5.4, gpt-5.4-mini, gpt-5.4-pro, gpt-5.5,
+ * gpt-5.5-pro). Persisted/configured model rows can omit the `input` field
+ * entirely when they were written by older OpenClaw versions. When that row wins
+ * the catalog merge, `modelSupportsInput(entry, "image")` returns false and the
+ * gateway's `chat.send` handler offloads inbound images as `media://inbound/<id>`
+ * claim-check URIs instead of inlining them.
+ *
+ * Mirrors the Anthropic precedent set by upstream #83756.
+ */
+function applyOpenAICodexImageInputCapability(params: {
+  modelId: string;
+  model: ProviderRuntimeModel;
+}): ProviderRuntimeModel | undefined {
+  if (hasImageInput(params.model.input)) {
+    return undefined;
+  }
+  if (!matchesOpenAICodexImageCapableModel(params.modelId, params.model.name)) {
+    return undefined;
+  }
+  return {
+    ...params.model,
+    input: ["text", "image"],
+  };
 }
 
 function normalizeCodexTransport(model: ProviderRuntimeModel): ProviderRuntimeModel {
@@ -180,6 +212,7 @@ function normalizeCodexTransport(model: ProviderRuntimeModel): ProviderRuntimeMo
 function resolveCodexForwardCompatModel(ctx: ProviderResolveDynamicModelContext) {
   const trimmedModelId = ctx.modelId.trim();
   const lower = normalizeLowercaseStringOrEmpty(trimmedModelId);
+  const synthBaseUrl = ctx.providerConfig?.baseUrl ?? OPENAI_CODEX_BASE_URL;
 
   if (lower === OPENAI_CODEX_GPT_55_MODEL_ID) {
     const model = ctx.modelRegistry.find(PROVIDER_ID, trimmedModelId) as
@@ -196,7 +229,7 @@ function resolveCodexForwardCompatModel(ctx: ProviderResolveDynamicModelContext)
         name: trimmedModelId,
         api: "openai-codex-responses",
         provider: PROVIDER_ID,
-        baseUrl: OPENAI_CODEX_BASE_URL,
+        baseUrl: synthBaseUrl,
         reasoning: true,
         input: ["text", "image"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -244,8 +277,6 @@ function resolveCodexForwardCompatModel(ctx: ProviderResolveDynamicModelContext)
       maxTokens: OPENAI_CODEX_GPT_54_MAX_TOKENS,
       cost: OPENAI_CODEX_GPT_54_MINI_COST,
     };
-  } else if (lower === OPENAI_CODEX_GPT_53_MODEL_ID) {
-    templateIds = OPENAI_CODEX_TEMPLATE_MODEL_IDS;
   } else {
     return undefined;
   }
@@ -272,7 +303,7 @@ function resolveCodexForwardCompatModel(ctx: ProviderResolveDynamicModelContext)
           : trimmedModelId,
       api: "openai-codex-responses",
       provider: PROVIDER_ID,
-      baseUrl: OPENAI_CODEX_BASE_URL,
+      baseUrl: synthBaseUrl,
       reasoning: true,
       input: ["text", "image"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -297,8 +328,12 @@ function withDefaultCodexContextMetadata(params: {
       : typeof params.model.contextWindow === "number" && params.model.contextWindow > 0
         ? Math.min(params.contextTokens, params.model.contextWindow)
         : params.contextTokens;
+  const input = params.model.input?.includes("image")
+    ? params.model.input
+    : ([...new Set([...(params.model.input ?? ["text"]), "image"])] as ("text" | "image")[]);
   return {
     ...params.model,
+    input,
     contextWindow: params.contextWindow,
     contextTokens,
   };
@@ -313,6 +348,36 @@ function buildCodexCredentialExtra(identity: {
     ...(identity.chatgptPlanType ? { chatgptPlanType: identity.chatgptPlanType } : {}),
   };
   return Object.keys(extra).length > 0 ? extra : undefined;
+}
+
+function buildOpenAICodexAuthConfigPatch(): NonNullable<ProviderAuthResult["configPatch"]> {
+  return {
+    agents: {
+      defaults: {
+        models: {
+          [OPENAI_CODEX_DEFAULT_MODEL]: {},
+        },
+      },
+    },
+  };
+}
+
+function applyOpenAICodexAuthConfig(
+  cfg: ProviderAuthContext["config"],
+): ProviderAuthContext["config"] {
+  return {
+    ...cfg,
+    agents: {
+      ...cfg.agents,
+      defaults: {
+        ...cfg.agents?.defaults,
+        models: {
+          ...cfg.agents?.defaults?.models,
+          [OPENAI_CODEX_DEFAULT_MODEL]: {},
+        },
+      },
+    },
+  };
 }
 
 async function refreshOpenAICodexOAuthCredential(cred: OAuthCredential) {
@@ -346,18 +411,14 @@ async function refreshOpenAICodexOAuthCredential(cred: OAuthCredential) {
 }
 
 async function runOpenAICodexOAuth(ctx: ProviderAuthContext) {
-  let creds;
-  try {
-    creds = await loginOpenAICodexOAuth({
-      prompter: ctx.prompter,
-      runtime: ctx.runtime,
-      isRemote: ctx.isRemote,
-      openUrl: ctx.openUrl,
-      localBrowserMessage: "Complete sign-in in browser…",
-    });
-  } catch {
-    return { profiles: [] };
-  }
+  const creds = await loginOpenAICodexOAuth({
+    prompter: ctx.prompter,
+    runtime: ctx.runtime,
+    oauth: ctx.oauth,
+    isRemote: ctx.isRemote,
+    openUrl: ctx.openUrl,
+    localBrowserMessage: "Complete sign-in in browser…",
+  });
   if (!creds) {
     return { profiles: [] };
   }
@@ -370,6 +431,7 @@ async function runOpenAICodexOAuth(ctx: ProviderAuthContext) {
   return buildOauthProviderAuthResult({
     providerId: PROVIDER_ID,
     defaultModel: OPENAI_CODEX_DEFAULT_MODEL,
+    configPatch: buildOpenAICodexAuthConfigPatch(),
     access: creds.access,
     refresh: creds.refresh,
     expires: creds.expires,
@@ -386,16 +448,15 @@ async function runOpenAICodexDeviceCode(ctx: ProviderAuthContext) {
       onProgress: (message) => spin.update(message),
       onVerification: async ({ verificationUrl, userCode, expiresInMs }) => {
         const expiresInMinutes = Math.max(1, Math.round(expiresInMs / 60_000));
-        const codeLine = ctx.isRemote
-          ? "Code: [shown on the local device only]"
-          : `Code: ${userCode}`;
+        // The prompter note is the user-facing TTY surface, so remote/headless
+        // users need the code there; keep the persistent runtime log URL-only.
         await ctx.prompter.note(
           [
             ctx.isRemote
               ? "Open this URL in your LOCAL browser and enter the code below."
               : "Open this URL in your browser and enter the code below.",
             `URL: ${verificationUrl}`,
-            codeLine,
+            `Code: ${userCode}`,
             `Code expires in ${expiresInMinutes} minutes. Never share it.`,
           ].join("\n"),
           "OpenAI Codex device code",
@@ -421,6 +482,7 @@ async function runOpenAICodexDeviceCode(ctx: ProviderAuthContext) {
     return buildOauthProviderAuthResult({
       providerId: PROVIDER_ID,
       defaultModel: OPENAI_CODEX_DEFAULT_MODEL,
+      configPatch: buildOpenAICodexAuthConfigPatch(),
       access: creds.access,
       refresh: creds.refresh,
       expires: creds.expires,
@@ -468,6 +530,7 @@ export function buildOpenAICodexProviderPlugin(): ProviderPlugin {
           choiceLabel: OPENAI_CODEX_LOGIN_LABEL,
           choiceHint: OPENAI_CODEX_LOGIN_HINT,
           assistantPriority: OPENAI_CODEX_LOGIN_ASSISTANT_PRIORITY,
+          onboardingFeatured: true,
           ...OPENAI_CODEX_WIZARD_GROUP,
         },
         run: async (ctx) => await runOpenAICodexOAuth(ctx),
@@ -484,14 +547,30 @@ export function buildOpenAICodexProviderPlugin(): ProviderPlugin {
           assistantPriority: OPENAI_CODEX_DEVICE_PAIRING_ASSISTANT_PRIORITY,
           ...OPENAI_CODEX_WIZARD_GROUP,
         },
-        run: async (ctx) => {
-          try {
-            return await runOpenAICodexDeviceCode(ctx);
-          } catch {
-            return { profiles: [] };
-          }
-        },
+        run: async (ctx) => await runOpenAICodexDeviceCode(ctx),
       },
+      createProviderApiKeyAuthMethod({
+        providerId: OPENAI_PROVIDER_ID,
+        methodId: "api-key",
+        label: OPENAI_CODEX_API_KEY_BACKUP_LABEL,
+        hint: OPENAI_CODEX_API_KEY_BACKUP_HINT,
+        optionKey: "openaiApiKey",
+        flagName: "--openai-api-key",
+        envVar: "OPENAI_API_KEY",
+        promptMessage: "Enter OpenAI API key",
+        profileId: "openai:default",
+        defaultModel: OPENAI_CODEX_DEFAULT_MODEL,
+        expectedProviders: [OPENAI_PROVIDER_ID],
+        applyConfig: applyOpenAICodexAuthConfig,
+        wizard: {
+          choiceId: "openai-codex-api-key",
+          choiceLabel: OPENAI_CODEX_API_KEY_BACKUP_LABEL,
+          choiceHint: OPENAI_CODEX_API_KEY_BACKUP_HINT,
+          assistantPriority: 5,
+          assistantVisibility: "manual-only",
+          ...OPENAI_CODEX_WIZARD_GROUP,
+        },
+      }),
     ],
     catalog: {
       order: "profile",
@@ -507,18 +586,7 @@ export function buildOpenAICodexProviderPlugin(): ProviderPlugin {
     },
     resolveDynamicModel: (ctx) => resolveCodexForwardCompatModel(ctx),
     buildAuthDoctorHint: (ctx) => buildOpenAICodexAuthDoctorHint(ctx),
-    resolveThinkingProfile: ({ modelId }) => ({
-      levels: [
-        { id: "off" },
-        { id: "minimal" },
-        { id: "low" },
-        { id: "medium" },
-        { id: "high" },
-        ...(matchesExactOrPrefix(modelId, OPENAI_CODEX_XHIGH_MODEL_IDS)
-          ? [{ id: "xhigh" as const }]
-          : []),
-      ],
-    }),
+    resolveThinkingProfile: ({ modelId }) => resolveOpenAICodexThinkingProfile(modelId),
     isModernModelRef: ({ modelId }) => matchesExactOrPrefix(modelId, OPENAI_CODEX_MODERN_MODEL_IDS),
     preferRuntimeResolvedModel: (ctx) => {
       if (normalizeProviderId(ctx.provider) !== PROVIDER_ID) {
@@ -539,7 +607,13 @@ export function buildOpenAICodexProviderPlugin(): ProviderPlugin {
       if (normalizeProviderId(ctx.provider) !== PROVIDER_ID) {
         return undefined;
       }
-      return normalizeCodexTransport(ctx.model);
+      const transportNormalized = normalizeCodexTransport(ctx.model);
+      const imageCapable =
+        applyOpenAICodexImageInputCapability({
+          modelId: ctx.modelId,
+          model: transportNormalized,
+        }) ?? transportNormalized;
+      return imageCapable === ctx.model ? undefined : imageCapable;
     },
     normalizeTransport: ({ provider, api, baseUrl }) => {
       if (normalizeProviderId(provider) !== PROVIDER_ID) {

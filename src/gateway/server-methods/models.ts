@@ -1,5 +1,9 @@
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { DEFAULT_PROVIDER } from "../../agents/defaults.js";
+import {
+  loadModelCatalogForBrowse,
+  type ModelCatalogBrowseView,
+} from "../../agents/model-catalog-browse.js";
 import { resolveVisibleModelCatalog } from "../../agents/model-catalog-visibility.js";
 import { resolveDefaultAgentWorkspaceDir } from "../../agents/workspace.js";
 import {
@@ -10,7 +14,9 @@ import {
 } from "../protocol/index.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
-type ModelsListView = "default" | "configured" | "all";
+type ModelsListView = ModelCatalogBrowseView;
+
+let loggedSlowModelsListCatalog = false;
 
 function resolveModelsListView(params: Record<string, unknown>): ModelsListView {
   return typeof params.view === "string" ? (params.view as ModelsListView) : "default";
@@ -30,22 +36,36 @@ export const modelsHandlers: GatewayRequestHandlers = {
       return;
     }
     try {
-      const catalog = await context.loadGatewayModelCatalog();
       const cfg = context.getRuntimeConfig();
       const workspaceDir =
         resolveAgentWorkspaceDir(cfg, resolveDefaultAgentId(cfg)) ??
         resolveDefaultAgentWorkspaceDir();
       const view = resolveModelsListView(params);
+      const catalog = await loadModelCatalogForBrowse({
+        cfg,
+        view,
+        loadCatalog: context.loadGatewayModelCatalog,
+        onTimeout: (timeoutMs) => {
+          if (loggedSlowModelsListCatalog) {
+            return;
+          }
+          loggedSlowModelsListCatalog = true;
+          context.logGateway.debug(
+            `models.list continuing without model catalog after ${timeoutMs}ms`,
+          );
+        },
+      });
       if (view === "all") {
         respond(true, { models: catalog }, undefined);
         return;
       }
-      const models = resolveVisibleModelCatalog({
+      const models = await resolveVisibleModelCatalog({
         cfg,
         catalog,
         defaultProvider: DEFAULT_PROVIDER,
         workspaceDir,
         view,
+        runtimeAuthDiscovery: false,
       });
       respond(true, { models }, undefined);
     } catch (err) {

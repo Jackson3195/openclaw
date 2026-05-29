@@ -4,6 +4,12 @@ import { normalizeGatewayEvent } from "./normalize.js";
 import { GatewayClientTransport, isConnectableTransport } from "./transport.js";
 import type {
   AgentRunParams,
+  ArtifactQuery,
+  ArtifactsDownloadResult,
+  ArtifactsGetResult,
+  ArtifactsListResult,
+  EnvironmentSummary,
+  EnvironmentsListResult,
   GatewayEvent,
   GatewayRequestOptions,
   OpenClawEvent,
@@ -14,6 +20,12 @@ import type {
   SessionCreateParams,
   SessionSendParams,
   SessionTarget,
+  TasksCancelResult,
+  TasksGetResult,
+  TasksListParams,
+  TasksListResult,
+  ToolInvokeParams,
+  ToolInvokeResult,
 } from "./types.js";
 
 const MAX_REPLAY_RUNS = 100;
@@ -61,6 +73,7 @@ function runStatusFromWaitPayload(payload: unknown): RunResult["status"] {
     stopReason === "cancelled" ||
     stopReason === "canceled" ||
     stopReason === "killed" ||
+    stopReason === "auth-revoked" ||
     stopReason === "rpc" ||
     stopReason === "user" ||
     (record.aborted === true && stopReason === "stop")
@@ -185,6 +198,20 @@ function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
+function hasArtifactQueryScope(params: unknown): params is ArtifactQuery {
+  const record = asRecord(params);
+  return [record.sessionKey, record.runId, record.taskId].some(
+    (value) => typeof value === "string" && value.trim().length > 0,
+  );
+}
+
+function requireArtifactQueryScope(api: string, params: unknown): ArtifactQuery {
+  if (!hasArtifactQueryScope(params)) {
+    throw new Error(`${api} requires one of sessionKey, runId, or taskId`);
+  }
+  return params;
+}
+
 function readChatProjection(event: OpenClawEvent): ChatProjection | undefined {
   const raw = event.raw;
   if (event.type !== "raw" || raw?.event !== "chat") {
@@ -214,6 +241,14 @@ function readChatProjectionText(payload: Record<string, unknown>): string | unde
   return text.length > 0 ? text : undefined;
 }
 
+function readChatProjectionDeltaText(payload: Record<string, unknown>): string | undefined {
+  return typeof payload.deltaText === "string" ? payload.deltaText : undefined;
+}
+
+function readChatProjectionReplace(payload: Record<string, unknown>): boolean {
+  return payload.replace === true;
+}
+
 function isAssistantRunEvent(event: OpenClawEvent): boolean {
   return event.type === "assistant.delta" || event.type === "assistant.message";
 }
@@ -233,9 +268,9 @@ function normalizeChatProjectionEvent(
   previousText: string | undefined,
 ): OpenClawEvent {
   const text = readChatProjectionText(projection.payload);
-  const isReplacement = Boolean(
-    previousText && text !== undefined && !text.startsWith(previousText),
-  );
+  const deltaText = readChatProjectionDeltaText(projection.payload);
+  const hasPreviousText = previousText !== undefined;
+  const isReplacement = readChatProjectionReplace(projection.payload);
   return {
     ...event,
     type: projection.state === "delta" ? "assistant.delta" : "run.completed",
@@ -244,7 +279,7 @@ function normalizeChatProjectionEvent(
         ? text !== undefined
           ? {
               text,
-              delta: isReplacement ? text : text.slice(previousText?.length ?? 0),
+              delta: hasPreviousText ? (deltaText ?? text) : text,
               ...(isReplacement ? { replace: true } : {}),
             }
           : event.data
@@ -703,19 +738,19 @@ export class TasksNamespace extends RpcNamespace {
     super(client, "tasks");
   }
 
-  async list(params?: unknown): Promise<unknown> {
-    void params;
-    return unsupportedGatewayApi("oc.tasks.list");
+  async list(params?: TasksListParams): Promise<TasksListResult> {
+    return await this.call("list", params);
   }
 
-  async get(taskId: string): Promise<unknown> {
-    void taskId;
-    return unsupportedGatewayApi("oc.tasks.get");
+  async get(taskId: string): Promise<TasksGetResult> {
+    return await this.call("get", { taskId });
   }
 
-  async cancel(taskId: string): Promise<unknown> {
-    void taskId;
-    return unsupportedGatewayApi("oc.tasks.cancel");
+  async cancel(taskId: string, options?: { reason?: string }): Promise<TasksCancelResult> {
+    return await this.call("cancel", {
+      taskId,
+      ...(options?.reason ? { reason: options.reason } : {}),
+    });
   }
 }
 
@@ -746,10 +781,15 @@ export class ToolsNamespace extends RpcNamespace {
     return await this.call("effective", params);
   }
 
-  async invoke(name: string, params?: unknown): Promise<unknown> {
-    void name;
-    void params;
-    return unsupportedGatewayApi("oc.tools.invoke");
+  async invoke(name: string, params?: ToolInvokeParams): Promise<ToolInvokeResult> {
+    return await this.call("invoke", {
+      name,
+      ...(params?.args ? { args: params.args } : {}),
+      ...(params?.sessionKey ? { sessionKey: params.sessionKey } : {}),
+      ...(params?.agentId ? { agentId: params.agentId } : {}),
+      ...(typeof params?.confirm === "boolean" ? { confirm: params.confirm } : {}),
+      ...(params?.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {}),
+    });
   }
 }
 
@@ -758,19 +798,22 @@ export class ArtifactsNamespace extends RpcNamespace {
     super(client, "artifacts");
   }
 
-  async list(params?: unknown): Promise<unknown> {
-    void params;
-    return unsupportedGatewayApi("oc.artifacts.list");
+  async list(params: ArtifactQuery): Promise<ArtifactsListResult> {
+    return await this.call("list", requireArtifactQueryScope("oc.artifacts.list", params));
   }
 
-  async get(id: string): Promise<unknown> {
-    void id;
-    return unsupportedGatewayApi("oc.artifacts.get");
+  async get(id: string, params: ArtifactQuery): Promise<ArtifactsGetResult> {
+    return await this.call("get", {
+      ...requireArtifactQueryScope("oc.artifacts.get", params),
+      artifactId: id,
+    });
   }
 
-  async download(id: string): Promise<unknown> {
-    void id;
-    return unsupportedGatewayApi("oc.artifacts.download");
+  async download(id: string, params: ArtifactQuery): Promise<ArtifactsDownloadResult> {
+    return await this.call("download", {
+      ...requireArtifactQueryScope("oc.artifacts.download", params),
+      artifactId: id,
+    });
   }
 }
 
@@ -791,9 +834,8 @@ export class EnvironmentsNamespace extends RpcNamespace {
     super(client, "environments");
   }
 
-  async list(params?: unknown): Promise<unknown> {
-    void params;
-    return unsupportedGatewayApi("oc.environments.list");
+  async list(params?: unknown): Promise<EnvironmentsListResult> {
+    return await this.call("list", params ?? {});
   }
 
   async create(params?: unknown): Promise<unknown> {
@@ -801,9 +843,8 @@ export class EnvironmentsNamespace extends RpcNamespace {
     return unsupportedGatewayApi("oc.environments.create");
   }
 
-  async status(environmentId: string): Promise<unknown> {
-    void environmentId;
-    return unsupportedGatewayApi("oc.environments.status");
+  async status(environmentId: string): Promise<EnvironmentSummary> {
+    return await this.call("status", { environmentId });
   }
 
   async delete(environmentId: string): Promise<unknown> {

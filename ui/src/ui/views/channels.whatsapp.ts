@@ -17,6 +17,8 @@ export function renderWhatsAppCard(params: {
 }) {
   const { props, whatsapp, accountCountLabel } = params;
   const configured = resolveChannelConfigured("whatsapp", props);
+  const linked = whatsapp?.linked === true;
+  const hasQr = props.whatsappQrDataUrl != null;
 
   return renderSingleAccountChannelCard({
     title: "WhatsApp",
@@ -50,38 +52,41 @@ export function renderWhatsAppCard(params: {
     ],
     lastError: whatsapp?.lastError,
     extraContent: html`
-      ${
-        props.whatsappMessage
-          ? html`<div class="callout" style="margin-top: 12px;">${props.whatsappMessage}</div>`
-          : nothing
-      }
-      ${
-        props.whatsappQrDataUrl
-          ? html`<div class="qr-wrap">
+      ${props.whatsappMessage
+        ? html`<div class="callout" style="margin-top: 12px;">${props.whatsappMessage}</div>`
+        : nothing}
+      ${props.whatsappQrDataUrl
+        ? html`<div class="qr-wrap">
             <img src=${props.whatsappQrDataUrl} alt="WhatsApp QR" />
           </div>`
-          : nothing
-      }
+        : nothing}
     `,
     configSection: renderChannelConfigSection({ channelId: "whatsapp", props }),
     footer: html`<div class="row" style="margin-top: 14px; flex-wrap: wrap;">
-      <button
-        class="btn primary"
-        ?disabled=${props.whatsappBusy}
-        @click=${() => props.onWhatsAppStart(false)}
-      >
-        ${props.whatsappBusy ? t("common.working") : t("common.showQr")}
-      </button>
-      <button
-        class="btn"
-        ?disabled=${props.whatsappBusy}
-        @click=${() => props.onWhatsAppStart(true)}
-      >
-        ${t("common.relink")}
-      </button>
-      <button class="btn" ?disabled=${props.whatsappBusy} @click=${() => props.onWhatsAppWait()}>
-        ${t("common.waitForScan")}
-      </button>
+      ${linked
+        ? html`<button
+            class="btn"
+            ?disabled=${props.whatsappBusy}
+            @click=${() => props.onWhatsAppStart(true)}
+          >
+            ${t("common.relink")}
+          </button>`
+        : html`<button
+            class="btn primary"
+            ?disabled=${props.whatsappBusy}
+            @click=${() => props.onWhatsAppStart(false)}
+          >
+            ${props.whatsappBusy ? t("common.working") : t("common.showQr")}
+          </button>`}
+      ${hasQr
+        ? html`<button
+            class="btn"
+            ?disabled=${props.whatsappBusy}
+            @click=${() => props.onWhatsAppWait()}
+          >
+            ${t("common.waitForScan")}
+          </button>`
+        : nothing}
       <button
         class="btn danger"
         ?disabled=${props.whatsappBusy}

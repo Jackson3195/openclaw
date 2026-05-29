@@ -5,6 +5,10 @@ import type {
   OpenClawPluginNodeInvokePolicyResult,
 } from "openclaw/plugin-sdk/plugin-entry";
 import { appendFileTransferAudit, type FileTransferAuditOp } from "./audit.js";
+import {
+  FILE_TRANSFER_NODE_INVOKE_COMMANDS,
+  type FileTransferNodeInvokeCommand,
+} from "./node-invoke-policy-commands.js";
 import { evaluateFilePolicy, persistAllowAlways, type FilePolicyKind } from "./policy.js";
 
 const FILE_FETCH_DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
@@ -14,9 +18,7 @@ const DIR_FETCH_HARD_MAX_BYTES = 16 * 1024 * 1024;
 const DIR_FETCH_ARCHIVE_LIST_TIMEOUT_MS = 30_000;
 const DIR_FETCH_ARCHIVE_LIST_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 
-type FileTransferCommand = "file.fetch" | "dir.list" | "dir.fetch" | "file.write";
-
-const COMMANDS: FileTransferCommand[] = ["file.fetch", "dir.list", "dir.fetch", "file.write"];
+type FileTransferCommand = FileTransferNodeInvokeCommand;
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -506,13 +508,24 @@ function policyDeniedResult(input: {
   };
 }
 
-async function runWritePreflight(input: {
+type PreflightResult =
+  | {
+      ok: true;
+      payload: Record<string, unknown> | null;
+      canonicalPath: string;
+    }
+  | {
+      ok: false;
+      result: OpenClawPluginNodeInvokePolicyResult;
+    };
+
+async function invokePreflight(input: {
   ctx: OpenClawPluginNodeInvokePolicyContext;
   op: FileTransferAuditOp;
   params: Record<string, unknown>;
   requestedPath: string;
   startedAt: number;
-}): Promise<OpenClawPluginNodeInvokePolicyResult | null> {
+}): Promise<PreflightResult> {
   const nodeDisplayName = input.ctx.node?.displayName;
   const preflight = await input.ctx.invokeNode({
     params: {
@@ -533,10 +546,13 @@ async function runWritePreflight(input: {
     });
     return {
       ok: false,
-      code: preflight.code,
-      message: `${input.op} failed: ${preflight.message}`,
-      details: preflight.details,
-      unavailable: true,
+      result: {
+        ok: false,
+        code: preflight.code,
+        message: `${input.op} failed: ${preflight.message}`,
+        details: preflight.details,
+        unavailable: true,
+      },
     };
   }
 
@@ -553,100 +569,31 @@ async function runWritePreflight(input: {
       errorMessage: typeof payload.message === "string" ? payload.message : undefined,
       durationMs: Date.now() - input.startedAt,
     });
-    return preflight;
+    return { ok: false, result: preflight };
   }
 
   const canonicalPath =
     payload && typeof payload.path === "string" && payload.path
       ? payload.path
       : input.requestedPath;
-  if (canonicalPath === input.requestedPath) {
-    return null;
-  }
-
-  const policy = evaluateFilePolicy({
-    nodeId: input.ctx.nodeId,
-    nodeDisplayName,
-    kind: "write",
-    path: canonicalPath,
-    pluginConfig: input.ctx.pluginConfig,
-  });
-  if (policy.ok) {
-    return null;
-  }
-
-  await appendFileTransferAudit({
-    op: input.op,
-    nodeId: input.ctx.nodeId,
-    nodeDisplayName,
-    requestedPath: input.requestedPath,
-    canonicalPath,
-    decision: "denied:symlink_escape",
-    errorCode: policy.code,
-    reason: policy.reason,
-    durationMs: Date.now() - input.startedAt,
-  });
-  return {
-    ok: false,
-    code: "SYMLINK_TARGET_DENIED",
-    message: `${input.op} SYMLINK_TARGET_DENIED: requested path resolved to ${canonicalPath} which is not allowed by policy`,
-  };
+  return { ok: true, payload, canonicalPath };
 }
 
-async function runFileFetchPreflight(input: {
+async function runPathPreflight(input: {
   ctx: OpenClawPluginNodeInvokePolicyContext;
   op: FileTransferAuditOp;
+  kind: FilePolicyKind;
   params: Record<string, unknown>;
   requestedPath: string;
   startedAt: number;
 }): Promise<OpenClawPluginNodeInvokePolicyResult | null> {
-  const nodeDisplayName = input.ctx.node?.displayName;
-  const preflight = await input.ctx.invokeNode({
-    params: {
-      ...input.params,
-      preflightOnly: true,
-    },
-  });
+  const preflight = await invokePreflight(input);
   if (!preflight.ok) {
-    await appendFileTransferAudit({
-      op: input.op,
-      nodeId: input.ctx.nodeId,
-      nodeDisplayName,
-      requestedPath: input.requestedPath,
-      decision: "error",
-      errorCode: preflight.code,
-      errorMessage: preflight.message,
-      durationMs: Date.now() - input.startedAt,
-    });
-    return {
-      ok: false,
-      code: preflight.code,
-      message: `${input.op} failed: ${preflight.message}`,
-      details: preflight.details,
-      unavailable: true,
-    };
+    return preflight.result;
   }
 
-  const payload = readResultPayload(preflight);
-  if (payload?.ok === false) {
-    await appendFileTransferAudit({
-      op: input.op,
-      nodeId: input.ctx.nodeId,
-      nodeDisplayName,
-      requestedPath: input.requestedPath,
-      canonicalPath: typeof payload.canonicalPath === "string" ? payload.canonicalPath : undefined,
-      decision: "error",
-      errorCode: typeof payload.code === "string" ? payload.code : undefined,
-      errorMessage: typeof payload.message === "string" ? payload.message : undefined,
-      durationMs: Date.now() - input.startedAt,
-    });
-    return preflight;
-  }
-
-  const canonicalPath =
-    payload && typeof payload.path === "string" && payload.path
-      ? payload.path
-      : input.requestedPath;
+  const nodeDisplayName = input.ctx.node?.displayName;
+  const { canonicalPath } = preflight;
   if (canonicalPath === input.requestedPath) {
     return null;
   }
@@ -654,7 +601,7 @@ async function runFileFetchPreflight(input: {
   const policy = evaluateFilePolicy({
     nodeId: input.ctx.nodeId,
     nodeDisplayName,
-    kind: "read",
+    kind: input.kind,
     path: canonicalPath,
     pluginConfig: input.ctx.pluginConfig,
   });
@@ -687,59 +634,17 @@ async function runDirFetchPreflight(input: {
   requestedPath: string;
   startedAt: number;
 }): Promise<OpenClawPluginNodeInvokePolicyResult | null> {
-  const nodeDisplayName = input.ctx.node?.displayName;
-  const preflight = await input.ctx.invokeNode({
-    params: {
-      ...input.params,
-      preflightOnly: true,
-    },
-  });
+  const preflight = await invokePreflight(input);
   if (!preflight.ok) {
-    await appendFileTransferAudit({
-      op: input.op,
-      nodeId: input.ctx.nodeId,
-      nodeDisplayName,
-      requestedPath: input.requestedPath,
-      decision: "error",
-      errorCode: preflight.code,
-      errorMessage: preflight.message,
-      durationMs: Date.now() - input.startedAt,
-    });
-    return {
-      ok: false,
-      code: preflight.code,
-      message: `${input.op} failed: ${preflight.message}`,
-      details: preflight.details,
-      unavailable: true,
-    };
+    return preflight.result;
   }
 
-  const payload = readResultPayload(preflight);
-  if (payload?.ok === false) {
-    await appendFileTransferAudit({
-      op: input.op,
-      nodeId: input.ctx.nodeId,
-      nodeDisplayName,
-      requestedPath: input.requestedPath,
-      canonicalPath: typeof payload.canonicalPath === "string" ? payload.canonicalPath : undefined,
-      decision: "error",
-      errorCode: typeof payload.code === "string" ? payload.code : undefined,
-      errorMessage: typeof payload.message === "string" ? payload.message : undefined,
-      durationMs: Date.now() - input.startedAt,
-    });
-    return preflight;
-  }
-
-  const canonicalPath =
-    payload && typeof payload.path === "string" && payload.path
-      ? payload.path
-      : input.requestedPath;
   return await validateDirFetchEntries({
     ctx: input.ctx,
     op: input.op,
     requestedPath: input.requestedPath,
-    canonicalPath,
-    entries: payload?.entries,
+    canonicalPath: preflight.canonicalPath,
+    entries: preflight.payload?.entries,
     startedAt: input.startedAt,
     phase: "preflight",
   });
@@ -748,7 +653,7 @@ async function runDirFetchPreflight(input: {
 async function handleFileTransferInvoke(
   ctx: OpenClawPluginNodeInvokePolicyContext,
 ): Promise<OpenClawPluginNodeInvokePolicyResult> {
-  if (!COMMANDS.includes(ctx.command as FileTransferCommand)) {
+  if (!FILE_TRANSFER_NODE_INVOKE_COMMANDS.includes(ctx.command as FileTransferCommand)) {
     return { ok: false, code: "UNSUPPORTED_COMMAND", message: "unsupported file-transfer command" };
   }
   const command = ctx.command as FileTransferCommand;
@@ -780,9 +685,10 @@ async function handleFileTransferInvoke(
     maxBytes: gate.maxBytes,
   });
   if (command === "file.fetch") {
-    const preflightDeny = await runFileFetchPreflight({
+    const preflightDeny = await runPathPreflight({
       ctx,
       op,
+      kind: "read",
       params: forwardedParams,
       requestedPath,
       startedAt,
@@ -791,9 +697,10 @@ async function handleFileTransferInvoke(
       return preflightDeny;
     }
   } else if (command === "file.write") {
-    const preflightDeny = await runWritePreflight({
+    const preflightDeny = await runPathPreflight({
       ctx,
       op,
+      kind: "write",
       params: forwardedParams,
       requestedPath,
       startedAt,
@@ -932,7 +839,7 @@ async function handleFileTransferInvoke(
 
 export function createFileTransferNodeInvokePolicy(): OpenClawPluginNodeInvokePolicy {
   return {
-    commands: COMMANDS,
+    commands: [...FILE_TRANSFER_NODE_INVOKE_COMMANDS],
     handle: handleFileTransferInvoke,
   };
 }

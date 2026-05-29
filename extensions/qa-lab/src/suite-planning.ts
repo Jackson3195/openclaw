@@ -1,10 +1,9 @@
 import path from "node:path";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { ensureRepoBoundDirectory, resolveRepoRelativeOutputDir } from "./cli-paths.js";
 import type { QaCliBackendAuthMode } from "./gateway-child.js";
 import type { QaProviderMode } from "./model-selection.js";
 import { getQaProvider } from "./providers/index.js";
-import type { QaTransportId } from "./qa-transport-registry.js";
 import { readQaBootstrapScenarioCatalog } from "./scenario-catalog.js";
 
 const DEFAULT_QA_SUITE_CONCURRENCY = 64;
@@ -33,7 +32,6 @@ function scenarioMatchesLiveLane(params: {
   primaryModel: string;
   providerMode: QaProviderMode;
   claudeCliAuthMode?: QaCliBackendAuthMode;
-  env?: NodeJS.ProcessEnv;
 }) {
   const config = params.scenario.execution.config ?? {};
   const requiredProviderMode = normalizeQaConfigString(config.requiredProviderMode);
@@ -43,7 +41,6 @@ function scenarioMatchesLiveLane(params: {
   if (getQaProvider(params.providerMode).kind !== "live") {
     return true;
   }
-  const env = params.env ?? process.env;
   const selected = splitModelRef(params.primaryModel);
   const requiredProvider = normalizeQaConfigString(config.requiredProvider);
   if (requiredProvider && selected?.provider !== requiredProvider) {
@@ -55,10 +52,6 @@ function scenarioMatchesLiveLane(params: {
   }
   const requiredAuthMode = normalizeQaConfigString(config.authMode);
   if (requiredAuthMode && params.claudeCliAuthMode !== requiredAuthMode) {
-    return false;
-  }
-  const requiredEnv = normalizeQaConfigString(config.requiredEnv);
-  if (requiredEnv && !env[requiredEnv]?.trim()) {
     return false;
   }
   return true;
@@ -73,20 +66,17 @@ function selectQaSuiteScenarios(params: {
 }) {
   const requestedScenarioIds =
     params.scenarioIds && params.scenarioIds.length > 0 ? new Set(params.scenarioIds) : null;
-  const requestedScenarios = requestedScenarioIds
-    ? params.scenarios.filter((scenario) => requestedScenarioIds.has(scenario.id))
-    : params.scenarios;
   if (requestedScenarioIds) {
-    const foundScenarioIds = new Set(requestedScenarios.map((scenario) => scenario.id));
+    const scenarioById = new Map(params.scenarios.map((scenario) => [scenario.id, scenario]));
     const missingScenarioIds = [...requestedScenarioIds].filter(
-      (scenarioId) => !foundScenarioIds.has(scenarioId),
+      (scenarioId) => !scenarioById.has(scenarioId),
     );
     if (missingScenarioIds.length > 0) {
       throw new Error(`unknown QA scenario id(s): ${missingScenarioIds.join(", ")}`);
     }
-    return requestedScenarios;
+    return [...requestedScenarioIds].map((scenarioId) => scenarioById.get(scenarioId)!);
   }
-  return requestedScenarios.filter((scenario) =>
+  return params.scenarios.filter((scenario) =>
     scenarioMatchesLiveLane({
       scenario,
       providerMode: params.providerMode,
@@ -160,6 +150,17 @@ function collectQaSuiteGatewayRuntimeOptions(
     }
   }
   return forwardHostHome ? { forwardHostHome: true } : undefined;
+}
+
+function shouldUseIsolatedQaSuiteScenarioWorkers(params: {
+  scenarios: ReturnType<typeof readQaBootstrapScenarioCatalog>["scenarios"];
+  concurrency: number;
+}) {
+  return (
+    params.scenarios.length > 1 &&
+    (params.concurrency > 1 ||
+      params.scenarios.some((scenario) => isQaPlainObject(scenario.gatewayConfigPatch)))
+  );
 }
 
 function scenarioRequiresControlUi(scenario: QaSeedScenario) {
@@ -276,10 +277,8 @@ export {
   normalizeQaSuiteConcurrency,
   resolveQaSuiteWorkerStartStaggerMs,
   resolveQaSuiteOutputDir,
-  scenarioMatchesLiveLane,
   scenarioRequiresControlUi,
   selectQaSuiteScenarios,
+  shouldUseIsolatedQaSuiteScenarioWorkers,
   splitModelRef,
 };
-
-export type { QaTransportId };

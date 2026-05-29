@@ -213,6 +213,8 @@ For custom OpenAI-compatible endpoints or overriding provider defaults:
 
   </Accordion>
   <Accordion title="Bedrock">
+    ### Bedrock embedding config
+
     Bedrock uses the AWS SDK default credential chain — no API keys needed. If OpenClaw runs on EC2 with a Bedrock-enabled instance role, just set the provider and model:
 
     ```json5
@@ -284,7 +286,7 @@ For custom OpenAI-compatible endpoints or overriding provider defaults:
     | `local.modelCacheDir` | `string`           | node-llama-cpp default | Cache dir for downloaded models                                                                                                                                                                                                                                                                                      |
     | `local.contextSize`   | `number \| "auto"` | `4096`                 | Context window size for the embedding context. 4096 covers typical chunks (128–512 tokens) while bounding non-weight VRAM. Lower to 1024–2048 on constrained hosts. `"auto"` uses the model's trained maximum — not recommended for 8B+ models (Qwen3-Embedding-8B: 40 960 tokens → ~32 GB VRAM vs ~8.8 GB at 4096). |
 
-    Default model: `embeddinggemma-300m-qat-Q8_0.gguf` (~0.6 GB, auto-downloaded). Packaged installs repair the native `node-llama-cpp` runtime through managed plugin runtime deps when `provider: "local"` is configured. Source checkouts still require native build approval: `pnpm approve-builds` then `pnpm rebuild node-llama-cpp`.
+    Default model: `embeddinggemma-300m-qat-Q8_0.gguf` (~0.6 GB, auto-downloaded). Source checkouts still require native build approval: `pnpm approve-builds` then `pnpm rebuild node-llama-cpp`.
 
     Use the standalone CLI to verify the same provider path the Gateway uses:
 
@@ -406,7 +408,7 @@ Supported formats: `.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`, `.heic`, `.heif` (i
 
 | Key                | Type      | Default | Description                      |
 | ------------------ | --------- | ------- | -------------------------------- |
-| `cache.enabled`    | `boolean` | `false` | Cache chunk embeddings in SQLite |
+| `cache.enabled`    | `boolean` | `true`  | Cache chunk embeddings in SQLite |
 | `cache.maxEntries` | `number`  | `50000` | Max cached embeddings            |
 
 Prevents re-embedding unchanged text during reindex or transcript updates.

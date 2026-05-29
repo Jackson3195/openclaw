@@ -1,9 +1,14 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { connectOverCdpMock, getChromeWebSocketUrlMock } from "./pw-session.mock-setup.js";
+import { chromium } from "playwright-core";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as chromeModule from "./chrome.js";
+import {
+  closePlaywrightBrowserConnection,
+  getPageForTargetId,
+  listPagesViaPlaywright,
+} from "./pw-session.js";
 
-let closePlaywrightBrowserConnection: typeof import("./pw-session.js").closePlaywrightBrowserConnection;
-let getPageForTargetId: typeof import("./pw-session.js").getPageForTargetId;
-let listPagesViaPlaywright: typeof import("./pw-session.js").listPagesViaPlaywright;
+const connectOverCdpSpy = vi.spyOn(chromium, "connectOverCDP");
+const getChromeWebSocketUrlSpy = vi.spyOn(chromeModule, "getChromeWebSocketUrl");
 
 type MockPageSpec = {
   targetId?: string;
@@ -16,6 +21,25 @@ type BrowserMockBundle = {
   browserClose: ReturnType<typeof vi.fn>;
   pages: import("playwright-core").Page[];
 };
+
+type FetchInitWithDispatcher = RequestInit & { dispatcher?: unknown };
+
+function requireFetchCall(fetchSpy: {
+  mock: { calls: Parameters<typeof fetch>[] };
+}): Parameters<typeof fetch> {
+  const [call] = fetchSpy.mock.calls;
+  if (!call) {
+    throw new Error("expected fallback fetch call");
+  }
+  return call;
+}
+
+function requireFetchInit(init: Parameters<typeof fetch>[1]): FetchInitWithDispatcher {
+  if (!init || typeof init !== "object") {
+    throw new Error("expected fallback fetch init");
+  }
+  return init as FetchInitWithDispatcher;
+}
 
 function makeBrowser(pages: MockPageSpec[]): BrowserMockBundle {
   let context: import("playwright-core").BrowserContext;
@@ -56,14 +80,9 @@ function makeBrowser(pages: MockPageSpec[]): BrowserMockBundle {
   return { browser, browserClose, pages: pageObjects };
 }
 
-beforeAll(async () => {
-  ({ closePlaywrightBrowserConnection, getPageForTargetId, listPagesViaPlaywright } =
-    await import("./pw-session.js"));
-});
-
 afterEach(async () => {
-  connectOverCdpMock.mockReset();
-  getChromeWebSocketUrlMock.mockReset();
+  connectOverCdpSpy.mockReset();
+  getChromeWebSocketUrlSpy.mockReset();
   await closePlaywrightBrowserConnection().catch(() => {});
 });
 
@@ -100,8 +119,8 @@ function createExtensionFallbackBrowserHarness(options?: {
     close: browserClose,
   } as unknown as import("playwright-core").Browser;
 
-  connectOverCdpMock.mockResolvedValue(browser);
-  getChromeWebSocketUrlMock.mockResolvedValue(null);
+  connectOverCdpSpy.mockResolvedValue(browser);
+  getChromeWebSocketUrlSpy.mockResolvedValue(null);
   return { browserClose, newCDPSession, pages };
 }
 
@@ -139,10 +158,14 @@ describe("pw-session getPageForTargetId", () => {
         targetId: "TARGET_B",
       });
       expect(resolved).toBe(pageB);
-      expect(fetchSpy).toHaveBeenCalledWith(
-        "http://127.0.0.1:18792/json/list?token=abc",
-        expect.any(Object),
-      );
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [fetchUrl, fetchInitOptions] = requireFetchCall(fetchSpy);
+      expect(fetchUrl).toBe("http://127.0.0.1:18792/json/list?token=abc");
+      const fetchInit = requireFetchInit(fetchInitOptions);
+      expect(fetchInit.headers).toEqual({});
+      expect(fetchInit.redirect).toBe("manual");
+      expect(fetchInit.signal).toBeInstanceOf(AbortSignal);
+      expect(fetchInit.dispatcher).toBeUndefined();
     } finally {
       fetchSpy.mockRestore();
     }
@@ -179,15 +202,15 @@ describe("pw-session getPageForTargetId", () => {
     const stale = makeBrowser([]);
     const fresh = makeBrowser([{ targetId: "TARGET_OK", url: "https://fresh.example" }]);
 
-    connectOverCdpMock.mockResolvedValueOnce(stale.browser).mockResolvedValueOnce(fresh.browser);
-    getChromeWebSocketUrlMock.mockResolvedValue(null);
+    connectOverCdpSpy.mockResolvedValueOnce(stale.browser).mockResolvedValueOnce(fresh.browser);
+    getChromeWebSocketUrlSpy.mockResolvedValue(null);
 
     await listPagesViaPlaywright({ cdpUrl: "http://127.0.0.1:9222" });
 
     const resolved = await getPageForTargetId({ cdpUrl: "http://127.0.0.1:9222" });
 
     expect(resolved).toBe(fresh.pages[0]);
-    expect(connectOverCdpMock).toHaveBeenCalledTimes(2);
+    expect(connectOverCdpSpy).toHaveBeenCalledTimes(2);
     expect(stale.browserClose).toHaveBeenCalledTimes(1);
   });
 
@@ -201,8 +224,8 @@ describe("pw-session getPageForTargetId", () => {
       { targetId: "TARGET_B", url: "https://beta.example" },
     ]);
 
-    connectOverCdpMock.mockResolvedValueOnce(stale.browser).mockResolvedValueOnce(fresh.browser);
-    getChromeWebSocketUrlMock.mockResolvedValue(null);
+    connectOverCdpSpy.mockResolvedValueOnce(stale.browser).mockResolvedValueOnce(fresh.browser);
+    getChromeWebSocketUrlSpy.mockResolvedValue(null);
 
     await getPageForTargetId({ cdpUrl: "http://127.0.0.1:9333" });
 
@@ -212,7 +235,7 @@ describe("pw-session getPageForTargetId", () => {
     });
 
     expect(resolved).toBe(fresh.pages[1]);
-    expect(connectOverCdpMock).toHaveBeenCalledTimes(2);
+    expect(connectOverCdpSpy).toHaveBeenCalledTimes(2);
     expect(stale.browserClose).toHaveBeenCalledTimes(1);
   });
 
@@ -220,27 +243,27 @@ describe("pw-session getPageForTargetId", () => {
     const stale = makeBrowser([]);
     const stillBroken = makeBrowser([]);
 
-    connectOverCdpMock
+    connectOverCdpSpy
       .mockResolvedValueOnce(stale.browser)
       .mockResolvedValueOnce(stillBroken.browser);
-    getChromeWebSocketUrlMock.mockResolvedValue(null);
+    getChromeWebSocketUrlSpy.mockResolvedValue(null);
 
     await listPagesViaPlaywright({ cdpUrl: "http://127.0.0.1:9444" });
 
     await expect(getPageForTargetId({ cdpUrl: "http://127.0.0.1:9444" })).rejects.toThrow(
       "No pages available in the connected browser.",
     );
-    expect(connectOverCdpMock).toHaveBeenCalledTimes(2);
+    expect(connectOverCdpSpy).toHaveBeenCalledTimes(2);
     expect(stale.browserClose).toHaveBeenCalledTimes(1);
   });
 
   it("does not add an extra top-level retry for non-recoverable connect failures", async () => {
-    connectOverCdpMock.mockRejectedValue(new Error("connectOverCDP exploded"));
-    getChromeWebSocketUrlMock.mockResolvedValue(null);
+    connectOverCdpSpy.mockRejectedValue(new Error("connectOverCDP exploded"));
+    getChromeWebSocketUrlSpy.mockResolvedValue(null);
 
     await expect(getPageForTargetId({ cdpUrl: "http://127.0.0.1:9555" })).rejects.toThrow(
       "connectOverCDP exploded",
     );
-    expect(connectOverCdpMock).toHaveBeenCalledTimes(3);
+    expect(connectOverCdpSpy).toHaveBeenCalledTimes(3);
   });
 });
