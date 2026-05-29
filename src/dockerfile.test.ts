@@ -245,6 +245,20 @@ describe("Dockerfile", () => {
     );
   });
 
+  it("keeps runtime workspace templates in final images", async () => {
+    const dockerfile = await readFile(dockerfilePath, "utf8");
+    const runtimeStageIndex = dockerfile.lastIndexOf("FROM base-runtime");
+    const templatesCopyIndex = dockerfile.indexOf(
+      "COPY --from=runtime-assets --chown=node:node /app/src/agents/templates ./src/agents/templates",
+      runtimeStageIndex,
+    );
+    const userIndex = dockerfile.indexOf("USER node", runtimeStageIndex);
+
+    expect(runtimeStageIndex).toBeGreaterThan(-1);
+    expect(templatesCopyIndex).toBeGreaterThan(runtimeStageIndex);
+    expect(templatesCopyIndex).toBeLessThan(userIndex);
+  });
+
   it("keeps package manager patch files in runtime images", async () => {
     const dockerfile = collapseDockerContinuations(await readFile(dockerfilePath, "utf8"));
     const pnpmWorkspace = YAML.parse(await readFile(pnpmWorkspacePath, "utf8")) as {
