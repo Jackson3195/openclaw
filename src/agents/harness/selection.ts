@@ -1,11 +1,13 @@
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
+import { isCliRuntimeAliasForProvider, isCliRuntimeProvider } from "../model-runtime-aliases.js";
 import type { CompactEmbeddedPiSessionParams } from "../pi-embedded-runner/compact.types.js";
 import type {
   EmbeddedRunAttemptParams,
   EmbeddedRunAttemptResult,
 } from "../pi-embedded-runner/run/types.js";
+import { normalizeEmbeddedAgentRuntime } from "../pi-embedded-runner/runtime.js";
 import type { EmbeddedPiCompactResult } from "../pi-embedded-runner/types.js";
 import {
   resolveEffectiveToolPolicy,
@@ -59,6 +61,11 @@ type AgentHarnessSelectionDecision = {
     | "forced_plugin"
     // Implicit Codex preference found no registered Codex harness, so PI handled the run.
     | "implicit_plugin_unavailable_pi"
+    // Explicit provider-owned CLI runtime aliases have no agent harness plugin
+    // counterpart. PI is returned as the transcript-composition placeholder; the
+    // actual run is routed through CLI dispatch by callers that consult model
+    // runtime policy (see `assertModelFallbackCandidateHarnessAvailable`).
+    | "cli_runtime_passthrough_pi"
     // Auto mode chose a registered plugin harness that supports the provider/model.
     | "auto_plugin"
     // Auto mode found no supporting plugin harness, so PI handled the run.
@@ -128,7 +135,10 @@ function selectAgentHarnessDecision(params: {
   agentHarnessRuntimeOverride?: string;
 }): AgentHarnessSelectionDecision {
   const resolvedPolicy = resolveConfiguredAgentHarnessPolicy(params);
-  const runtimeOverride = params.agentHarnessRuntimeOverride?.trim();
+  const runtimeOverride =
+    params.agentHarnessRuntimeOverride === undefined
+      ? undefined
+      : normalizeEmbeddedAgentRuntime(params.agentHarnessRuntimeOverride);
   const policy =
     runtimeOverride && runtimeOverride !== "auto" && runtimeOverride !== "default"
       ? ({
@@ -153,12 +163,35 @@ function selectAgentHarnessDecision(params: {
   if (runtime !== "auto") {
     const forced = pluginHarnesses.find((entry) => entry.id === runtime);
     if (forced) {
-      return buildSelectionDecision({
-        harness: forced,
-        policy,
-        selectedReason: "forced_plugin",
-        candidates: listHarnessCandidates(pluginHarnesses),
+      const support = forced.supports({
+        provider: params.provider,
+        modelId: params.modelId,
+        requestedRuntime: runtime,
       });
+      if (support.supported) {
+        return buildSelectionDecision({
+          harness: forced,
+          policy,
+          selectedReason: "forced_plugin",
+          candidates: listHarnessCandidates(pluginHarnesses),
+        });
+      }
+      if (isCliRuntimeAliasForProvider({ runtime, provider: params.provider })) {
+        return buildSelectionDecision({
+          harness: piHarness,
+          policy: {
+            ...policy,
+            runtime: "pi",
+          },
+          selectedReason: "cli_runtime_passthrough_pi",
+          candidates: listHarnessCandidates(pluginHarnesses),
+        });
+      }
+      throw new Error(
+        `Requested agent harness "${runtime}" does not support ${formatProviderModel(params)}${
+          support.reason ? ` (${support.reason})` : ""
+        }.`,
+      );
     }
     if (runtime === "codex" && policy.runtimeSource === "implicit") {
       return buildSelectionDecision({
@@ -168,6 +201,17 @@ function selectAgentHarnessDecision(params: {
           runtime: "pi",
         },
         selectedReason: "implicit_plugin_unavailable_pi",
+        candidates: listHarnessCandidates(pluginHarnesses),
+      });
+    }
+    if (isCliRuntimeAliasForProvider({ runtime, provider: params.provider })) {
+      return buildSelectionDecision({
+        harness: piHarness,
+        policy: {
+          ...policy,
+          runtime: "pi",
+        },
+        selectedReason: "cli_runtime_passthrough_pi",
         candidates: listHarnessCandidates(pluginHarnesses),
       });
     }
@@ -442,6 +486,18 @@ function logAgentHarnessSelection(
 export async function maybeCompactAgentHarnessSession(
   params: CompactEmbeddedPiSessionParams,
 ): Promise<EmbeddedPiCompactResult | undefined> {
+  if (params.provider && isCliRuntimeProvider(params.provider)) {
+    return undefined;
+  }
+  const runtime = resolveConfiguredAgentHarnessPolicy({
+    provider: params.provider,
+    modelId: params.model,
+    config: params.config,
+    sessionKey: params.sessionKey,
+  }).runtime;
+  if (isCliRuntimeAliasForProvider({ runtime, provider: params.provider })) {
+    return undefined;
+  }
   const harness = selectAgentHarness({
     provider: params.provider ?? "",
     modelId: params.model,
@@ -460,4 +516,7 @@ export async function maybeCompactAgentHarnessSession(
     return undefined;
   }
   return harness.compact(params);
+}
+function formatProviderModel(params: { provider: string; modelId?: string }): string {
+  return params.modelId ? `${params.provider}/${params.modelId}` : params.provider;
 }

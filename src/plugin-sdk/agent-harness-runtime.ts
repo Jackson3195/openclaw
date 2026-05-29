@@ -145,6 +145,13 @@ export {
   logAgentRuntimeToolDiagnostics,
   normalizeAgentRuntimeTools,
 } from "../agents/runtime-plan/tools.js";
+export {
+  inspectRuntimeToolInputSchemas,
+  projectRuntimeToolInputSchema,
+  type RuntimeToolInputSchemaJson,
+  type RuntimeToolInputSchemaProjection,
+  type RuntimeToolSchemaDiagnostic,
+} from "../agents/tool-schema-projection.js";
 export type {
   CodexBundleMcpThreadConfig,
   LoadCodexBundleMcpThreadConfigParams,
@@ -163,7 +170,11 @@ export {
   hasSandboxBindReadonlyHostShadows,
   resolveWritableSandboxBindHostRoots,
 } from "../agents/sandbox/fs-paths.js";
-export { resolveBootstrapContextForRun } from "../agents/bootstrap-files.js";
+export {
+  buildBootstrapContextForFiles,
+  resolveBootstrapContextForRun,
+  resolveBootstrapFilesForRun,
+} from "../agents/bootstrap-files.js";
 export type { EmbeddedContextFile } from "../agents/pi-embedded-helpers/types.js";
 export { isSubagentSessionKey } from "../routing/session-key.js";
 export {
@@ -175,11 +186,13 @@ export {
 export { appendSessionTranscriptMessage } from "../config/sessions/transcript-append.js";
 export { emitSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 export {
+  getBeforeToolCallPolicyDiagnosticState,
   hasBeforeToolCallPolicy,
   isToolWrappedWithBeforeToolCallHook,
   runBeforeToolCallHook,
   setBeforeToolCallDiagnosticsEnabled,
   wrapToolWithBeforeToolCallHook,
+  type BeforeToolCallPolicyDiagnosticState,
 } from "../agents/pi-tools.before-tool-call.js";
 export {
   resolveAgentHarnessBeforePromptBuildResult,
