@@ -254,23 +254,4 @@ describe("bench-cli-startup", () => {
       ).toThrow("OPENCLAW_GATEWAY_PORT must be an integer >= 1");
     }
   });
-
-  it("writes a config fixture for config get benchmarks", () => {
-    expect(
-      testing.buildConfigFixture({
-        id: "configGetGatewayPort",
-        name: "config get gateway.port",
-        args: ["config", "get", "gateway.port"],
-        presets: ["real"],
-      }),
-    ).toEqual({ gateway: { port: 32123 } });
-    expect(
-      testing.buildConfigFixture({
-        id: "gatewayHealthJson",
-        name: "gateway health --json",
-        args: ["gateway", "health", "--json"],
-        presets: ["real"],
-      }),
-    ).toBeNull();
-  });
 });

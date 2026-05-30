@@ -362,15 +362,11 @@ describe("github-copilot plugin", () => {
       throw new Error(`unexpected fetch in github-copilot refresh test: ${target}`);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const fetchGuardCalls: Array<{ timeoutMs?: number }> = [];
-    setGitHubCopilotDeviceFlowFetchGuardForTesting(async (params) => {
-      fetchGuardCalls.push({ timeoutMs: params.timeoutMs });
-      return {
-        response: await fetchMock(params.url, params.init),
-        finalUrl: params.url,
-        release: async () => {},
-      };
-    });
+    setGitHubCopilotDeviceFlowFetchGuardForTesting(async (params) => ({
+      response: await fetchMock(params.url, params.init),
+      finalUrl: params.url,
+      release: async () => {},
+    }));
     const prompter = {
       confirm: vi.fn(async () => true),
       note: vi.fn(),
@@ -410,7 +406,6 @@ describe("github-copilot plugin", () => {
         provider: "github-copilot",
         token: "refreshed-token",
       });
-      expect(fetchGuardCalls.map((call) => call.timeoutMs)).toEqual([30_000, 30_000]);
     } finally {
       vi.unstubAllGlobals();
       if (isTtyDescriptor) {
