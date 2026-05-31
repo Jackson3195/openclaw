@@ -10,6 +10,7 @@ import { recordChannelActivity } from "openclaw/plugin-sdk/channel-activity-runt
 import { formatLocationText } from "openclaw/plugin-sdk/channel-inbound";
 import { createInboundDebouncer } from "openclaw/plugin-sdk/channel-inbound-debounce";
 import { getChildLogger } from "openclaw/plugin-sdk/logging-core";
+import { parseStrictFiniteNumber } from "openclaw/plugin-sdk/number-runtime";
 import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
 import { defaultRuntime, logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
@@ -79,6 +80,17 @@ type LocalGroupMetadataCacheEntry = WhatsAppGroupMetadataCacheEntry & {
   participants?: string[];
   mentionParticipants?: WhatsAppOutboundMentionParticipant[];
 };
+
+function parseWhatsAppTimestampSeconds(value: unknown): number | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    return parseStrictFiniteNumber(value);
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
 
 function rememberGroupMetadataCacheEntry<T extends WhatsAppGroupMetadataCacheEntry>(
   cache: Map<string, T>,
@@ -615,9 +627,9 @@ export async function attachWebInboxToSocket(
       groupSubject = meta.subject;
       groupParticipants = meta.participants;
     }
-    const messageTimestampMs = msg.messageTimestamp
-      ? Number(msg.messageTimestamp) * 1000
-      : undefined;
+    const messageTimestampSeconds = parseWhatsAppTimestampSeconds(msg.messageTimestamp);
+    const messageTimestampMs =
+      messageTimestampSeconds !== undefined ? messageTimestampSeconds * 1000 : undefined;
 
     // Fire message_observed for ALL messages (including fromMe) after identity
     // resolution but before access control. If a plugin returns
@@ -779,9 +791,8 @@ export async function attachWebInboxToSocket(
       return false;
     }
     const APPEND_RECENT_GRACE_MS = 60_000;
-    const msgTsRaw = msg.messageTimestamp;
-    const msgTsNum = msgTsRaw != null ? Number(msgTsRaw) : Number.NaN;
-    const msgTsMs = Number.isFinite(msgTsNum) ? msgTsNum * 1000 : 0;
+    const msgTsSeconds = parseWhatsAppTimestampSeconds(msg.messageTimestamp);
+    const msgTsMs = msgTsSeconds !== undefined ? msgTsSeconds * 1000 : 0;
     return msgTsMs < connectedAtMs - APPEND_RECENT_GRACE_MS;
   };
 
