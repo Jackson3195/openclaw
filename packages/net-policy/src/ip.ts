@@ -1,5 +1,16 @@
 import ipaddr from "ipaddr.js";
-import { normalizeLowercaseStringOrEmpty, normalizeOptionalString } from "../string-coerce.js";
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function normalizeLowercaseStringOrEmpty(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
 
 /** Parsed IP address value returned by the net-policy parsing helpers. */
 export type ParsedIpAddress = ipaddr.IPv4 | ipaddr.IPv6;
