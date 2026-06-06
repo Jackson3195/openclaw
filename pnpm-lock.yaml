@@ -1700,6 +1700,12 @@ importers:
         specifier: 2026.5.28
         version: 2026.5.28
 
+  extensions/whatsapp-passive-monitor:
+    devDependencies:
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
+
   extensions/workboard:
     dependencies:
       typebox:
